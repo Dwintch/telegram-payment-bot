@@ -201,8 +201,6 @@ def send_report(chat_id):
     bot.send_message(chat_id, "✅ Отчёт отправлен!", reply_markup=get_shop_menu())
     user_data[chat_id] = {}
 
-# === ЗАПУСК ===
-print("✅ Бот запущен...")
 
 # Отвечает за автоматический старт при любом сообщении
 
@@ -213,6 +211,11 @@ def handle_any_message(message):
         start(message)  # запустим старт
     else:
         bot.send_message(chat_id, "Выберите действие:", reply_markup=get_main_menu())
+
+
+
+# === ЗАПУСК ===
+print("✅ Бот запущен...")
 
 bot.infinity_polling()
 
