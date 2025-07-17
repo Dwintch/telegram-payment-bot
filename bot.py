@@ -203,7 +203,8 @@ def send_report(chat_id):
 
 # === ЗАПУСК ===
 print("✅ Бот запущен...")
-bot.infinity_polling()
+
+# Отвечает за автоматический старт при любом сообщении
 
 @bot.message_handler(func=lambda message: True)
 def handle_any_message(message):
@@ -212,3 +213,7 @@ def handle_any_message(message):
         start(message)  # запустим старт
     else:
         bot.send_message(chat_id, "Выберите действие:", reply_markup=get_main_menu())
+
+bot.infinity_polling()
+
+
