@@ -1,0 +1,173 @@
+import telebot
+from telebot import types
+import gspread
+from datetime import datetime
+from oauth2client.service_account import ServiceAccountCredentials
+
+# === НАСТРОЙКИ ===
+TOKEN = '8197209578:AAH4ypgRz9Butww_HxDTBeXJCgTzHQO1D_E'
+GOOGLE_CREDENTIALS_FILE = 'credentials.json'
+SPREADSHEET_NAME = 'Отчёты'
+
+REPORT_CHAT_ID = -1002826712980
+REPORT_THREAD_ID = 3
+
+bot = telebot.TeleBot(TOKEN)
+user_data = {}
+
+# === Google Sheets ===
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_CREDENTIALS_FILE, scope)
+client = gspread.authorize(creds)
+sheet = client.open(SPREADSHEET_NAME).sheet1
+
+# === /start ===
+@bot.message_handler(commands=['start'])
+def start(message):
+    chat_id = message.chat.id
+    user_data[chat_id] = {'shop': None, 'transactions': [], 'mode': 'add'}
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add('Янтарь', 'Хайп', 'Полка')
+    bot.send_message(chat_id, "Выберите магазин:", reply_markup=markup)
+
+# === Выбор магазина ===
+@bot.message_handler(func=lambda m: m.text in ['Янтарь', 'Хайп', 'Полка'])
+def choose_shop(message):
+    chat_id = message.chat.id
+    user_data[chat_id]['shop'] = message.text
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add('💰 Перевод', '🔙 Возврат')
+    markup.add('🧾 Составить отчёт', '👀 Посмотреть сумму')
+    bot.send_message(chat_id, f"Выбран магазин: {message.text}\nВыберите действие:", reply_markup=markup)
+
+# === Перевод / Возврат ===
+@bot.message_handler(func=lambda m: m.text in ['💰 Перевод', '🔙 Возврат'])
+def action_handler(message):
+    chat_id = message.chat.id
+    if chat_id not in user_data:
+        bot.send_message(chat_id, "Сначала нажмите /start")
+        return
+    user_data[chat_id]['mode'] = 'subtract' if message.text == '🔙 Возврат' else 'add'
+    bot.send_message(chat_id, "Введите сумму:")
+
+# === Сумма перевода ===
+@bot.message_handler(func=lambda m: m.text.isdigit())
+def handle_amount(message):
+    chat_id = message.chat.id
+    amount = int(message.text)
+    mode = user_data[chat_id].get('mode', 'add')
+
+    if mode == 'subtract':
+        amount = -amount
+        user_data[chat_id]['mode'] = 'add'  # Сброс на обычный режим
+
+    user_data[chat_id]['transactions'].append(amount)
+    total = sum(user_data[chat_id]['transactions'])
+    bot.send_message(chat_id, f"Сумма {'вычтена' if amount < 0 else 'добавлена'}: {abs(amount)}₽\n💳 Всего: {total}₽")
+
+# === Посмотреть сумму ===
+@bot.message_handler(func=lambda m: m.text == '👀 Посмотреть сумму')
+def view_sum(message):
+    chat_id = message.chat.id
+    if chat_id not in user_data:
+        bot.send_message(chat_id, "Сначала нажмите /start")
+        return
+    transactions = user_data[chat_id].get('transactions', [])
+    total = sum(transactions)
+    bot.send_message(chat_id, f"🏪 Магазин: {user_data[chat_id]['shop']}\n💳 Переводы: {total}₽\n🧾 Транзакций: {len(transactions)}")
+
+# === Составить отчёт ===
+@bot.message_handler(func=lambda m: m.text == '🧾 Составить отчёт')
+def compose_report(message):
+    chat_id = message.chat.id
+    transactions = user_data[chat_id].get('transactions', [])
+    if not transactions:
+        bot.send_message(chat_id, "Нет данных для отчёта.")
+        return
+    total = sum(transactions)
+    user_data[chat_id]['total'] = total
+    bot.send_message(chat_id, f"📋 Переводов на сумму: {total}₽\nВведите сумму наличных:")
+    bot.register_next_step_handler(message, get_cash)
+
+def get_cash(message):
+    chat_id = message.chat.id
+    try:
+        cash = int(message.text)
+        user_data[chat_id]['cash'] = cash
+        bot.send_message(chat_id, "Введите сумму по терминалу:")
+        bot.register_next_step_handler(message, get_terminal)
+    except ValueError:
+        bot.send_message(chat_id, "Введите сумму наличных:")
+        bot.register_next_step_handler(message, get_cash)
+
+def get_terminal(message):
+    chat_id = message.chat.id
+    try:
+        terminal = int(message.text)
+        user_data[chat_id]['terminal'] = terminal
+
+        shop = user_data[chat_id]['shop']
+        total = user_data[chat_id]['total']
+        cash = user_data[chat_id]['cash']
+        terminal = user_data[chat_id]['terminal']
+        now = datetime.now().strftime("%d.%m.%Y %H:%M")
+
+        report = (
+            f"📦 Магазин: {shop}\n"
+            f"📅 Дата: {now}\n"
+            f"💳 Переводы: {total}₽\n"
+            f"💵 Наличные: {cash}₽\n"
+            f"🏧 Терминал: {terminal}₽"
+        )
+
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add('✅ Отправить отчёт', '❌ Отмена')
+
+        user_data[chat_id]['report_text'] = report
+        bot.send_message(chat_id, report + "\n\nПодтвердите отправку:", reply_markup=markup)
+
+    except ValueError:
+        bot.send_message(chat_id, "Введите сумму по терминалу:")
+        bot.register_next_step_handler(message, get_terminal)
+
+# === Обработка кнопок подтверждения ===
+@bot.message_handler(func=lambda m: m.text in ['✅ Отправить отчёт', '❌ Отмена'])
+def handle_report_choice(message):
+    chat_id = message.chat.id
+
+    if message.text == '❌ Отмена':
+        user_data[chat_id].pop('cash', None)
+        user_data[chat_id].pop('terminal', None)
+        user_data[chat_id].pop('total', None)
+        user_data[chat_id].pop('report_text', None)
+        bot.send_message(chat_id, "❌ Отчёт отменён.")
+
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add('💰 Перевод', '🔙 Возврат')
+        markup.add('🧾 Составить отчёт', '👀 Посмотреть сумму')
+        bot.send_message(chat_id, "Выберите действие:", reply_markup=markup)
+        return
+
+    # Отправка в таблицу
+    shop = user_data[chat_id]['shop']
+    total = user_data[chat_id]['total']
+    cash = user_data[chat_id]['cash']
+    terminal = user_data[chat_id]['terminal']
+    now = datetime.now().strftime("%d.%m.%Y %H:%M")
+    sheet.append_row([now, shop, total, cash, terminal])
+
+    # Отправка в группу в тему
+    report_text = user_data[chat_id]['report_text']
+    bot.send_message(REPORT_CHAT_ID, report_text, message_thread_id=REPORT_THREAD_ID)
+
+    # Очистка
+    user_data[chat_id]['transactions'] = []
+    for key in ['cash', 'terminal', 'total', 'report_text']:
+        user_data[chat_id].pop(key, None)
+
+    bot.send_message(chat_id, "✅ Отчёт отправлен! Можно продолжать работу.")
+
+# === Запуск ===
+print("✅ Бот запущен...")
+bot.infinity_polling()
+
