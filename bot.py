@@ -205,3 +205,10 @@ def send_report(chat_id):
 print("✅ Бот запущен...")
 bot.infinity_polling()
 
+@bot.message_handler(func=lambda message: True)
+def handle_any_message(message):
+    chat_id = message.chat.id
+    if chat_id not in user_data:
+        start(message)  # запустим старт
+    else:
+        bot.send_message(chat_id, "Выберите действие:", reply_markup=get_main_menu())
