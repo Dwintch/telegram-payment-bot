@@ -49,7 +49,7 @@ def start(message):
         "terminal": 0,
         "stage": "choose_shop"
     }
-    bot.send_message(chat_id, "Привет! Выбери магазин:", reply_markup=get_shop_menu())
+    bot.send_message(chat_id, "Ну что по считаем копеечки! Выбери магазин:", reply_markup=get_shop_menu())
 
 # === ВЫБОР МАГАЗИНА ===
 @bot.message_handler(func=lambda m: m.text in ["Янтарь", "Хайп", "Полка"])
@@ -86,14 +86,14 @@ def handle_transfer(message):
     chat_id = message.chat.id
     user_data[chat_id]["mode"] = "add"
     user_data[chat_id]["stage"] = "amount_input"
-    bot.send_message(chat_id, "Введите сумму:")
+    bot.send_message(chat_id, "Оп еще лавешечка капнула! Сколько пришло?:")
 
 @bot.message_handler(func=lambda m: m.text == "💸 Возврат")
 def handle_return(message):
     chat_id = message.chat.id
     user_data[chat_id]["mode"] = "subtract"
     user_data[chat_id]["stage"] = "amount_input"
-    bot.send_message(chat_id, "Введите сумму возврата:")
+    bot.send_message(chat_id, "Смешно, возват на сумму:")
 
 @bot.message_handler(func=lambda m: m.text == "👀 Посмотреть сумму")
 def show_total(message):
@@ -133,7 +133,7 @@ def handle_amount(message):
     elif stage == "cash_input":
         user_data[chat_id]["cash"] = amount
         user_data[chat_id]["stage"] = "terminal_input"
-        bot.send_message(chat_id, "Введите сумму по терминалу:")
+        bot.send_message(chat_id, "Сколько капнуло по терминалу:")
 
     elif stage == "terminal_input":
         user_data[chat_id]["terminal"] = amount
@@ -171,7 +171,7 @@ def confirm_and_send(message):
 def edit_data(message):
     chat_id = message.chat.id
     user_data[chat_id]["stage"] = "cash_input"
-    bot.send_message(chat_id, "Введите сумму наличных:")
+    bot.send_message(chat_id, "Сколько наличных?:")
 
 # === ОТПРАВКА В TABLE + ТГ ===
 def send_report(chat_id):
