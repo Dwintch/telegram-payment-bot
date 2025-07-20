@@ -34,7 +34,7 @@ def get_shop_menu():
 
 def get_confirm_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("✅ Отправить", "✏️ Изменить данные", "❌ Отмена")
+    markup.add("✅ Отправить", "✏️ Изменить данные", "🗓 Изменить дату", "❌ Отмена")
     return markup
 
 # === START ===
@@ -47,7 +47,8 @@ def start(message):
         "mode": "add",
         "cash": 0,
         "terminal": 0,
-        "stage": "choose_shop"
+        "stage": "choose_shop",
+        "custom_date": None
     }
     bot.send_message(chat_id, "Ну что по считаем копеечки! Выбери магазин:", reply_markup=get_shop_menu())
 
@@ -61,7 +62,8 @@ def choose_shop(message):
         "mode": "add",
         "cash": 0,
         "terminal": 0,
-        "stage": "main"
+        "stage": "main",
+        "custom_date": None
     })
     bot.send_message(chat_id, f"Выбран магазин: {message.text}", reply_markup=get_main_menu())
 
@@ -74,7 +76,8 @@ def cancel_action(message):
             "mode": "add",
             "cash": 0,
             "terminal": 0,
-            "stage": "main"
+            "stage": "main",
+            "custom_date": None
         })
         bot.send_message(chat_id, "❌ Действие отменено. Выберите действие:", reply_markup=get_main_menu())
     else:
@@ -137,7 +140,6 @@ def handle_amount(message):
 
     elif stage == "terminal_input":
         user_data[chat_id]["terminal"] = amount
-        user_data[chat_id]["stage"] = "confirm_report"
         preview_report(chat_id)
 
 # === ПРЕДПРОСМОТР ОТЧЕТА ===
@@ -148,17 +150,20 @@ def preview_report(chat_id):
     cash = data["cash"]
     terminal = data["terminal"]
     total = transfers + cash + terminal
-    now = datetime.now().strftime("%d.%m.%Y %H:%M")
+    now_full = datetime.now().strftime("%d.%m.%Y %H:%M")
+    report_date = data.get("custom_date", datetime.now().strftime("%d.%m.%Y"))
 
     report_text = (
         f"📦 Магазин: {shop}\n"
-        f"🕒 Время: {now}\n"
+        f"📅 Дата: {report_date}\n"
+        f"🕒 Время отправки: {now_full}\n"
         f"💳 Переводы: {transfers}₽\n"
         f"💵 Наличные: {cash}₽\n"
         f"🏧 Терминал: {terminal}₽\n"
         f"📊 Итого: {total}₽"
     )
 
+    user_data[chat_id]["stage"] = "date_selection"
     bot.send_message(chat_id, report_text, reply_markup=get_confirm_menu())
 
 # === ПОДТВЕРЖДЕНИЕ / ИЗМЕНЕНИЕ / ОТМЕНА ===
@@ -173,6 +178,24 @@ def edit_data(message):
     user_data[chat_id]["stage"] = "cash_input"
     bot.send_message(chat_id, "Сколько наличных?:")
 
+@bot.message_handler(func=lambda m: m.text == "🗓 Изменить дату")
+def ask_for_custom_date(message):
+    chat_id = message.chat.id
+    user_data[chat_id]["stage"] = "custom_date_input"
+    bot.send_message(chat_id, "Введите дату отчёта в формате ДД.ММ.ГГГГ:")
+
+@bot.message_handler(func=lambda m: user_data.get(m.chat.id, {}).get("stage") == "custom_date_input")
+def handle_custom_date(message):
+    chat_id = message.chat.id
+    try:
+        custom_date = datetime.strptime(message.text, "%d.%m.%Y")
+        user_data[chat_id]["custom_date"] = custom_date.strftime("%d.%m.%Y")
+        user_data[chat_id]["stage"] = "confirm_report"
+        bot.send_message(chat_id, f"✅ Дата изменена на: {user_data[chat_id]['custom_date']}")
+        preview_report(chat_id)
+    except ValueError:
+        bot.send_message(chat_id, "⚠️ Неверный формат даты. Введите в формате ДД.ММ.ГГГГ:")
+
 # === ОТПРАВКА В TABLE + ТГ ===
 def send_report(chat_id):
     data = user_data[chat_id]
@@ -181,11 +204,13 @@ def send_report(chat_id):
     cash = data["cash"]
     terminal = data["terminal"]
     total = transfers + cash + terminal
-    now = datetime.now().strftime("%d.%m.%Y %H:%M")
+    now_full = datetime.now().strftime("%d.%m.%Y %H:%M")
+    report_date = data.get("custom_date", datetime.now().strftime("%d.%m.%Y"))
 
     report_text = (
         f"📦 Магазин: {shop}\n"
-        f"🕒 Время: {now}\n"
+        f"📅 Дата: {report_date}\n"
+        f"🕒 Время отправки: {now_full}\n"
         f"💳 Переводы: {transfers}₽\n"
         f"💵 Наличные: {cash}₽\n"
         f"🏧 Терминал: {terminal}₽\n"
@@ -193,7 +218,7 @@ def send_report(chat_id):
     )
 
     # Отправка в таблицу
-    sheet.append_row([now, shop, transfers, cash, terminal])
+    sheet.append_row([report_date, shop, transfers, cash, terminal])
 
     # Отправка в тему
     bot.send_message(CHAT_ID_FOR_REPORT, report_text, message_thread_id=THREAD_ID_FOR_REPORT)
@@ -201,22 +226,15 @@ def send_report(chat_id):
     bot.send_message(chat_id, "✅ Отчёт отправлен!", reply_markup=get_shop_menu())
     user_data[chat_id] = {}
 
-
-# Отвечает за автоматический старт при любом сообщении
-
+# === ОБРАБОТКА ПРОЧИХ СООБЩЕНИЙ ===
 @bot.message_handler(func=lambda message: True)
 def handle_any_message(message):
     chat_id = message.chat.id
     if chat_id not in user_data:
-        start(message)  # запустим старт
+        start(message)
     else:
         bot.send_message(chat_id, "Выберите действие:", reply_markup=get_main_menu())
 
-
-
 # === ЗАПУСК ===
 print("✅ Бот запущен...")
-
 bot.infinity_polling()
-
-
