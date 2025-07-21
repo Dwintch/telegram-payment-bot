@@ -174,8 +174,7 @@ def preview_report(chat_id):
         if cash < 40000:
             salary = 2000
         else:
-            one_person = round_to_50((cash * 0.10) / 2)
-            salary = one_person * 2
+            salary = round_to_50(cash * 0.10)
     else:
         salary = max(2000, round_to_50(cash * 0.10))
 
