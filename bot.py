@@ -170,13 +170,10 @@ def preview_report(chat_id):
     total = transfers + cash + terminal
     date = data["date"]
 
-    if shop == "Янтарь":
-        if cash < 40000:
-            salary = 2000
-        else:
-            salary = round_to_50(cash * 0.10)
+    if total < 40000:
+        salary = 2000
     else:
-        salary = max(2000, round_to_50(cash * 0.10))
+        salary = round_to_50(total * 0.10)
 
     report_text = (
         f"📦 Магазин: {shop}\n"
