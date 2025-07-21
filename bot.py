@@ -170,10 +170,16 @@ def preview_report(chat_id):
     total = transfers + cash + terminal
     date = data["date"]
 
-    if total < 40000:
-        salary = 2000
+    if shop == "Янтарь":
+        if total < 40000:
+            salary = 2000
+        else:
+            salary = round_to_50(total * 0.10)
+        each = salary // 2
+        salary_text = f"👔 ЗП: {salary}₽\n👤 По {each}₽ каждому"
     else:
-        salary = round_to_50(total * 0.10)
+        salary = max(2000, round_to_50(total * 0.10))
+        salary_text = f"👔 ЗП: {salary}₽"
 
     report_text = (
         f"📦 Магазин: {shop}\n"
@@ -182,7 +188,7 @@ def preview_report(chat_id):
         f"💵 Наличные: {cash}₽\n"
         f"🏧 Терминал: {terminal}₽\n"
         f"📊 Итого: {total}₽\n"
-        f"👔 ЗП: {salary}₽"
+        f"{salary_text}"
     )
 
     bot.send_message(chat_id, report_text, reply_markup=get_confirm_menu())
