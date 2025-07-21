@@ -164,7 +164,9 @@ def preview_report(chat_id):
 
     raw_salary = cash * 0.10
     if shop == "Янтарь":
-        salary = max(round(raw_salary / 2 / 50) * 50, 2000)
+        per_person = raw_salary / 2
+        per_person_rounded = max(round(per_person / 50) * 50, 2000)
+        salary = per_person_rounded * 2
     else:
         salary = max(round(raw_salary / 50) * 50, 2000)
 
