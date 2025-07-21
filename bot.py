@@ -1,8 +1,11 @@
+import os
+from dotenv import load_dotenv
 import telebot
 from telebot import types
 from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+
 
 # === НАСТРОЙКИ ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
