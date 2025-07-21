@@ -5,7 +5,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 # === НАСТРОЙКИ ===
-BOT_TOKEN = '8197209578:AAH4ypgRz9Butww_HxDTBeXJCgTzHQO1D_E'
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID_FOR_REPORT = -1002826712980
 THREAD_ID_FOR_REPORT = 3
 GOOGLE_SHEET_NAME = 'Отчёты'
