@@ -152,6 +152,14 @@ def handle_amount(message):
         user_data[chat_id]["stage"] = "confirm_report"
         preview_report(chat_id)
 
+# === ОКРУГЛЕНИЕ ДО 50 ===
+def round_to_50(value):
+    remainder = value % 50
+    if remainder < 25:
+        return int(value - remainder)
+    else:
+        return int(value + (50 - remainder))
+
 # === ПРЕДПРОСМОТР ОТЧЕТА ===
 def preview_report(chat_id):
     data = user_data[chat_id]
@@ -162,13 +170,14 @@ def preview_report(chat_id):
     total = transfers + cash + terminal
     date = data["date"]
 
-    raw_salary = cash * 0.10
     if shop == "Янтарь":
-        per_person = raw_salary / 2
-        per_person_rounded = max(round(per_person / 50) * 50, 2000)
-        salary = per_person_rounded * 2
+        if cash < 40000:
+            salary = 2000
+        else:
+            one_person = round_to_50((cash * 0.10) / 2)
+            salary = one_person * 2
     else:
-        salary = max(round(raw_salary / 50) * 50, 2000)
+        salary = max(2000, round_to_50(cash * 0.10))
 
     report_text = (
         f"📦 Магазин: {shop}\n"
