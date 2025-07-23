@@ -172,10 +172,10 @@ def preview_report(chat_id):
 
     if shop == "Янтарь":
         if total < 40000:
-            salary = 2000
+            salary = 4000
         else:
-            salary = round_to_50(total * 0.10)
-        each = salary // 2
+            each = round_to_50((total * 0.10) / 2)
+            salary = each * 2
         salary_text = f"👔 ЗП: {salary}₽\n👤 По {each}₽ каждому"
     else:
         salary = max(2000, round_to_50(total * 0.10))
