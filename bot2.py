@@ -119,7 +119,8 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-def run_bot2():
+    run_bot2()
+
     print("✅ Бот 2 запущен...")
     bot.infinity_polling()
 
