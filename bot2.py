@@ -10,13 +10,16 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN_2")
 GROUP_CHAT_ID_ENV = os.getenv("CHAT_ID_FOR_REPORT")
-THREAD_ID_ENV = os.getenv("THREAD_ID_2")  # Новая переменная для темы (ID темы)
+THREAD_ID_ENV = os.getenv("THREAD_ID_FOR_REPORT2")  # Обрати внимание на переменную
+
+if BOT_TOKEN is None:
+    raise RuntimeError("Переменная окружения BOT_TOKEN_2 не установлена!")
 
 if GROUP_CHAT_ID_ENV is None:
     raise RuntimeError("Переменная окружения CHAT_ID_FOR_REPORT не установлена!")
 
 if THREAD_ID_ENV is None:
-    raise RuntimeError("Переменная окружения THREAD_ID_2 не установлена!")
+    raise RuntimeError("Переменная окружения THREAD_ID_FOR_REPORT2 не установлена!")
 
 GROUP_CHAT_ID = int(GROUP_CHAT_ID_ENV)
 THREAD_ID = int(THREAD_ID_ENV)
@@ -28,9 +31,10 @@ TOP_COUNTER_FILE = "top_counter.json"
 
 orders = defaultdict(list)
 position_counter = Counter()
-user_states = {}  # user_id -> state info
+user_states = {}  # user_id -> состояние пользователя
 
-# Загрузка счётчика
+
+# Загрузка счётчика позиций из файла
 if os.path.exists(TOP_COUNTER_FILE):
     with open(TOP_COUNTER_FILE, "r", encoding="utf-8") as f:
         position_counter.update(json.load(f))
@@ -63,7 +67,7 @@ def shop_chosen(call):
     bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        text=f"Вы выбрали магазин: <b>{shop}</b>\nТеперь введите список заказа:",
+        text=f"Вы выбрали магазин: <b>{shop.capitalize()}</b>\nТеперь введите список заказа:",
         parse_mode="HTML",
     )
     bot.answer_callback_query(call.id)
@@ -86,12 +90,12 @@ def receive_order(message):
     save_counter()
 
     formatted = "\n".join(f"▪️ {p}" for p in positions)
-    bot.send_message(message.chat.id, f"✅ Заказ принят для <b>{shop}</b>:\n{formatted}", parse_mode="HTML")
+    bot.send_message(message.chat.id, f"✅ Заказ принят для <b>{shop.capitalize()}</b>:\n{formatted}", parse_mode="HTML")
 
     # Отправляем в группу в тему с ID THREAD_ID
     bot.send_message(
         GROUP_CHAT_ID,
-        f"🛒 <b>Новый заказ для {shop}</b>:\n{formatted}",
+        f"🛒 <b>Новый заказ для {shop.capitalize()}</b>:\n{formatted}",
         parse_mode="HTML",
         message_thread_id=THREAD_ID,
     )
