@@ -9,7 +9,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN_2")
-GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID_2"))
+group_chat_id_env = os.getenv("GROUP_CHAT_ID_2")
+
+if group_chat_id_env is None:
+    raise RuntimeError("Переменная окружения GROUP_CHAT_ID_2 не установлена!")
+
+GROUP_CHAT_ID = int(group_chat_id_env)
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
