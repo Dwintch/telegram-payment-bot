@@ -6,33 +6,25 @@ from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# === Загрузка переменных окружения ===
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID_FOR_REPORT = os.getenv("CHAT_ID_FOR_REPORT")
-THREAD_ID_FOR_REPORT = os.getenv("THREAD_ID_FOR_REPORT")
+BOT_TOKEN = os.getenv("BOT_TOKEN_1")
+CHAT_ID_FOR_REPORT = int(os.getenv("CHAT_ID_FOR_REPORT"))
+THREAD_ID_FOR_REPORT = int(os.getenv("THREAD_ID_FOR_REPORT"))
 GOOGLE_SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
-CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE")  # Например: /etc/secrets/credentials.json
+CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE")  # Например, /etc/secrets/credentials.json
 
 if not all([BOT_TOKEN, CHAT_ID_FOR_REPORT, THREAD_ID_FOR_REPORT, GOOGLE_SHEET_NAME, CREDENTIALS_FILE]):
     raise ValueError("Одна или несколько переменных окружения не заданы")
 
-# Преобразуем в нужные типы
-CHAT_ID_FOR_REPORT = int(CHAT_ID_FOR_REPORT)
-THREAD_ID_FOR_REPORT = int(THREAD_ID_FOR_REPORT)
-
-# === Инициализация бота и таблицы ===
 bot = telebot.TeleBot(BOT_TOKEN)
 user_data = {}
 
-# === Google Sheets ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
 client = gspread.authorize(creds)
 sheet = client.open(GOOGLE_SHEET_NAME).sheet1
 
-# === Кнопки ===
 def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("💰 Перевод", "💸 Возврат")
@@ -50,7 +42,6 @@ def get_confirm_menu():
     markup.add("✅ Отправить", "✏️ Изменить данные", "🗓 Изменить дату", "❌ Отмена")
     return markup
 
-# === Start ===
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
@@ -65,7 +56,6 @@ def start(message):
     }
     bot.send_message(chat_id, "Ну что, по считаем копеечки! Выбери магазин:", reply_markup=get_shop_menu())
 
-# === Выбор магазина ===
 @bot.message_handler(func=lambda m: m.text in ["Янтарь", "Хайп", "Полка"])
 def choose_shop(message):
     chat_id = message.chat.id
@@ -80,7 +70,6 @@ def choose_shop(message):
     })
     bot.send_message(chat_id, f"Выбран магазин: {message.text}", reply_markup=get_main_menu())
 
-# === Отмена ===
 @bot.message_handler(func=lambda m: m.text == "❌ Отменить")
 def cancel_action(message):
     chat_id = message.chat.id
@@ -96,7 +85,6 @@ def cancel_action(message):
     else:
         bot.send_message(chat_id, "Сначала выбери магазин:", reply_markup=get_shop_menu())
 
-# === Перевод / Возврат ===
 @bot.message_handler(func=lambda m: m.text == "💰 Перевод")
 def handle_transfer(message):
     chat_id = message.chat.id
@@ -128,7 +116,6 @@ def start_report(message):
     user_data[chat_id]["stage"] = "cash_input"
     bot.send_message(chat_id, f"🧾 Переводов на сумму: {total}₽\nВведите сумму наличных:")
 
-# === Ввод сумм ===
 @bot.message_handler(func=lambda m: m.text.isdigit())
 def handle_amount(message):
     chat_id = message.chat.id
@@ -156,12 +143,10 @@ def handle_amount(message):
         user_data[chat_id]["stage"] = "confirm_report"
         preview_report(chat_id)
 
-# === Округление ===
 def round_to_50(value):
     remainder = value % 50
     return int(value - remainder) if remainder < 25 else int(value + (50 - remainder))
 
-# === Предпросмотр отчета ===
 def preview_report(chat_id):
     data = user_data[chat_id]
     shop = data["shop"]
@@ -195,7 +180,6 @@ def preview_report(chat_id):
 
     bot.send_message(chat_id, report_text, reply_markup=get_confirm_menu())
 
-# === Подтверждение ===
 @bot.message_handler(func=lambda m: m.text == "✅ Отправить")
 def confirm_and_send(message):
     chat_id = message.chat.id
@@ -226,7 +210,6 @@ def set_date(message):
     except ValueError:
         bot.send_message(chat_id, "❌ Неверный формат даты. Введите ДД.ММ.ГГГГ")
 
-# === Отправка отчёта ===
 def send_report(chat_id):
     data = user_data[chat_id]
     shop = data["shop"]
