@@ -243,4 +243,5 @@ def send_report(chat_id):
 
 def run_bot1():
     print("✅ Бот 1 запущен...")
+    bot.remove_webhook()  # <- ВАЖНО: убираем возможный конфликт
     bot.infinity_polling()
