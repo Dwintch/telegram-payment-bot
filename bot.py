@@ -256,5 +256,6 @@ def handle_any_message(message):
         bot.send_message(chat_id, "Выберите действие:", reply_markup=get_main_menu())
 
 # === ЗАПУСК ===
-print("✅ Бот запущен...")
-bot.infinity_polling()
+def run_bot1():
+    print("✅ Бот 1 запущен...")
+    bot.infinity_polling()
