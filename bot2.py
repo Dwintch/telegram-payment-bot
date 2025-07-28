@@ -110,16 +110,4 @@ def top_positions(message):
         return
     top = position_counter.most_common(10)
     result = ["📈 <b>Топ популярных позиций:</b>"]
-    for i, (item, count) in enumerate(top, 1):
-        result.append(f"{i}. {item} — <b>{count}</b> раз(а)")
-    bot.send_message(message.chat.id, "\n".join(result), parse_mode="HTML")
-
-
-# Функция запуска для main.py
-def run_bot2():
-    print("✅ Бот 2 запущен...")
-    bot.infinity_polling()
-
-
-if __name__ == "__main__":
-    run_bot2()
+    for i
