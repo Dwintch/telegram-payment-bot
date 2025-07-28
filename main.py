@@ -1,4 +1,7 @@
 # main.py
+from dotenv import load_dotenv
+load_dotenv()
+
 import threading
 from bot import run_bot1
 from bot2 import run_bot2
