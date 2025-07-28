@@ -10,11 +10,16 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN_2")
 group_chat_id_env = os.getenv("GROUP_CHAT_ID_2")
+thread_id_env = os.getenv("THREAD_ID_2")
 
 if group_chat_id_env is None:
     raise RuntimeError("Переменная окружения GROUP_CHAT_ID_2 не установлена!")
 
+if thread_id_env is None:
+    raise RuntimeError("Переменная окружения THREAD_ID_2 не установлена!")
+
 GROUP_CHAT_ID = int(group_chat_id_env)
+THREAD_ID_2 = int(thread_id_env)
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -83,8 +88,8 @@ def receive_order(message):
     formatted = "\n".join(f"▪️ {p}" for p in positions)
     bot.send_message(message.chat.id, f"✅ Заказ принят для <b>{shop}</b>:\n{formatted}", parse_mode="HTML")
 
-    # Отправляем в группу
-    bot.send_message(GROUP_CHAT_ID, f"🛒 <b>Новый заказ для {shop}</b>:\n{formatted}", parse_mode="HTML")
+    # Отправляем в группу с указанием темы
+    bot.send_message(GROUP_CHAT_ID, f"🛒 <b>Новый заказ для {shop}</b>:\n{formatted}", parse_mode="HTML", message_thread_id=THREAD_ID_2)
 
     # Сброс состояния
     user_states.pop(user_id, None)
@@ -115,7 +120,6 @@ def top_positions(message):
     bot.send_message(message.chat.id, "\n".join(result), parse_mode="HTML")
 
 
-# Функция запуска для main.py
 def run_bot2():
     print("✅ Бот 2 запущен...")
     bot.infinity_polling()
