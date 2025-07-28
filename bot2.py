@@ -9,17 +9,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN_2")
-group_chat_id_env = os.getenv("GROUP_CHAT_ID_2")
-thread_id_env = os.getenv("THREAD_ID_2")
+GROUP_CHAT_ID_ENV = os.getenv("CHAT_ID_FOR_REPORT")
+THREAD_ID_ENV = os.getenv("THREAD_ID_2")  # Новая переменная для темы (ID темы)
 
-if group_chat_id_env is None:
-    raise RuntimeError("Переменная окружения GROUP_CHAT_ID_2 не установлена!")
+if GROUP_CHAT_ID_ENV is None:
+    raise RuntimeError("Переменная окружения CHAT_ID_FOR_REPORT не установлена!")
 
-if thread_id_env is None:
+if THREAD_ID_ENV is None:
     raise RuntimeError("Переменная окружения THREAD_ID_2 не установлена!")
 
-GROUP_CHAT_ID = int(group_chat_id_env)
-THREAD_ID_2 = int(thread_id_env)
+GROUP_CHAT_ID = int(GROUP_CHAT_ID_ENV)
+THREAD_ID = int(THREAD_ID_ENV)
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -88,8 +88,13 @@ def receive_order(message):
     formatted = "\n".join(f"▪️ {p}" for p in positions)
     bot.send_message(message.chat.id, f"✅ Заказ принят для <b>{shop}</b>:\n{formatted}", parse_mode="HTML")
 
-    # Отправляем в группу с указанием темы
-    bot.send_message(GROUP_CHAT_ID, f"🛒 <b>Новый заказ для {shop}</b>:\n{formatted}", parse_mode="HTML", message_thread_id=THREAD_ID_2)
+    # Отправляем в группу в тему с ID THREAD_ID
+    bot.send_message(
+        GROUP_CHAT_ID,
+        f"🛒 <b>Новый заказ для {shop}</b>:\n{formatted}",
+        parse_mode="HTML",
+        message_thread_id=THREAD_ID,
+    )
 
     # Сброс состояния
     user_states.pop(user_id, None)
