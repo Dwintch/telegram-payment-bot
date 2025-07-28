@@ -131,6 +131,7 @@ def top_positions(message):
 
 def run_bot2():
     print("✅ Бот 2 запущен...")
+    bot.remove_webhook()  # <- ВАЖНО: убираем возможный конфликт с вебхуком
     bot.infinity_polling()
 
 
