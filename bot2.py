@@ -19,18 +19,16 @@ GROUP_CHAT_ID = int(group_chat_id_env)
 bot = telebot.TeleBot(BOT_TOKEN)
 
 SHOP_NAMES = ["янтарь", "хайп", "полка"]
-
 TOP_COUNTER_FILE = "top_counter.json"
 
 orders = defaultdict(list)
 position_counter = Counter()
+user_states = {}  # user_id -> state info
 
 # Загрузка счётчика
 if os.path.exists(TOP_COUNTER_FILE):
     with open(TOP_COUNTER_FILE, "r", encoding="utf-8") as f:
         position_counter.update(json.load(f))
-
-user_states = {}  # user_id -> state info
 
 
 def save_counter():
@@ -117,6 +115,11 @@ def top_positions(message):
     bot.send_message(message.chat.id, "\n".join(result), parse_mode="HTML")
 
 
-if __name__ == "__main__":
+# Функция запуска для main.py
+def run_bot2():
     print("✅ Бот 2 запущен...")
     bot.infinity_polling()
+
+
+if __name__ == "__main__":
+    run_bot2()
