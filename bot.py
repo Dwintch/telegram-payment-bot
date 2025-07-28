@@ -6,14 +6,31 @@ from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# Загружаем .env
+# === Загрузка переменных окружения ===
 load_dotenv()
 
-# Загружаем переменные окружения как строки
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID_FOR_REPORT = os.getenv("CHAT_ID_FOR_REPORT")
-THREAD_ID_FOR_REPORT = os.getenv("_
+THREAD_ID_FOR_REPORT = os.getenv("THREAD_ID_FOR_REPORT")
+GOOGLE_SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
+CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE")  # Например: /etc/secrets/credentials.json
 
+if not all([BOT_TOKEN, CHAT_ID_FOR_REPORT, THREAD_ID_FOR_REPORT, GOOGLE_SHEET_NAME, CREDENTIALS_FILE]):
+    raise ValueError("Одна или несколько переменных окружения не заданы")
+
+# Преобразуем в нужные типы
+CHAT_ID_FOR_REPORT = int(CHAT_ID_FOR_REPORT)
+THREAD_ID_FOR_REPORT = int(THREAD_ID_FOR_REPORT)
+
+# === Инициализация бота и таблицы ===
+bot = telebot.TeleBot(BOT_TOKEN)
+user_data = {}
+
+# === Google Sheets ===
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
+client = gspread.authorize(creds)
+sheet = client.open(GOOGLE_SHEET_NAME).sheet1
 
 # === Кнопки ===
 def get_main_menu():
