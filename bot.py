@@ -12,18 +12,22 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID_FOR_REPORT = int(os.getenv("CHAT_ID_FOR_REPORT"))
 THREAD_ID_FOR_REPORT = int(os.getenv("THREAD_ID_FOR_REPORT"))
 GOOGLE_SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME")
-CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE")
+CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE")  # Обязательно: /etc/secrets/credentials.json
 
+if not all([BOT_TOKEN, CHAT_ID_FOR_REPORT, THREAD_ID_FOR_REPORT, GOOGLE_SHEET_NAME, CREDENTIALS_FILE]):
+    raise ValueError("Одна или несколько переменных окружения не заданы")
+
+# Инициализация бота
 bot = telebot.TeleBot(BOT_TOKEN)
 user_data = {}
 
-# === GOOGLE SHEETS ===
+# === Google Sheets ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
 client = gspread.authorize(creds)
 sheet = client.open(GOOGLE_SHEET_NAME).sheet1
 
-# === КНОПКИ ===
+# === Кнопки ===
 def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("💰 Перевод", "💸 Возврат")
@@ -41,7 +45,7 @@ def get_confirm_menu():
     markup.add("✅ Отправить", "✏️ Изменить данные", "🗓 Изменить дату", "❌ Отмена")
     return markup
 
-# === START ===
+# === Start ===
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
@@ -54,9 +58,9 @@ def start(message):
         "stage": "choose_shop",
         "date": datetime.now().strftime("%d.%m.%Y")
     }
-    bot.send_message(chat_id, "Ну что по считаем копеечки! Выбери магазин:", reply_markup=get_shop_menu())
+    bot.send_message(chat_id, "Ну что, по считаем копеечки! Выбери магазин:", reply_markup=get_shop_menu())
 
-# === ВЫБОР МАГАЗИНА ===
+# === Выбор магазина ===
 @bot.message_handler(func=lambda m: m.text in ["Янтарь", "Хайп", "Полка"])
 def choose_shop(message):
     chat_id = message.chat.id
@@ -71,7 +75,7 @@ def choose_shop(message):
     })
     bot.send_message(chat_id, f"Выбран магазин: {message.text}", reply_markup=get_main_menu())
 
-# === ОТМЕНА ===
+# === Отмена ===
 @bot.message_handler(func=lambda m: m.text == "❌ Отменить")
 def cancel_action(message):
     chat_id = message.chat.id
@@ -87,20 +91,20 @@ def cancel_action(message):
     else:
         bot.send_message(chat_id, "Сначала выбери магазин:", reply_markup=get_shop_menu())
 
-# === ПЕРЕВОД / ВОЗВРАТ ===
+# === Перевод / Возврат ===
 @bot.message_handler(func=lambda m: m.text == "💰 Перевод")
 def handle_transfer(message):
     chat_id = message.chat.id
     user_data[chat_id]["mode"] = "add"
     user_data[chat_id]["stage"] = "amount_input"
-    bot.send_message(chat_id, "Оп еще лавешечка капнула! Сколько пришло?:")
+    bot.send_message(chat_id, "Оп, лавешечка капнула! Сколько пришло?")
 
 @bot.message_handler(func=lambda m: m.text == "💸 Возврат")
 def handle_return(message):
     chat_id = message.chat.id
     user_data[chat_id]["mode"] = "subtract"
     user_data[chat_id]["stage"] = "amount_input"
-    bot.send_message(chat_id, "Смешно, возват на сумму:")
+    bot.send_message(chat_id, "Смешно, возврат на сумму:")
 
 @bot.message_handler(func=lambda m: m.text == "👀 Посмотреть сумму")
 def show_total(message):
@@ -119,7 +123,7 @@ def start_report(message):
     user_data[chat_id]["stage"] = "cash_input"
     bot.send_message(chat_id, f"🧾 Переводов на сумму: {total}₽\nВведите сумму наличных:")
 
-# === ВВОД СУММ ===
+# === Ввод сумм ===
 @bot.message_handler(func=lambda m: m.text.isdigit())
 def handle_amount(message):
     chat_id = message.chat.id
@@ -134,11 +138,8 @@ def handle_amount(message):
         else:
             user_data[chat_id]["transfers"].append(amount)
             bot.send_message(chat_id, f"✅ Добавлено: {amount}₽")
-
-        total = sum(user_data[chat_id]["transfers"])
-        bot.send_message(chat_id, f"💰 Текущая сумма: {total}₽", reply_markup=get_main_menu())
-        user_data[chat_id]["mode"] = "add"
         user_data[chat_id]["stage"] = "main"
+        bot.send_message(chat_id, f"💰 Текущая сумма: {sum(user_data[chat_id]['transfers'])}₽", reply_markup=get_main_menu())
 
     elif stage == "cash_input":
         user_data[chat_id]["cash"] = amount
@@ -150,15 +151,12 @@ def handle_amount(message):
         user_data[chat_id]["stage"] = "confirm_report"
         preview_report(chat_id)
 
-# === ОКРУГЛЕНИЕ ДО 50 ===
+# === Округление ===
 def round_to_50(value):
     remainder = value % 50
-    if remainder < 25:
-        return int(value - remainder)
-    else:
-        return int(value + (50 - remainder))
+    return int(value - remainder) if remainder < 25 else int(value + (50 - remainder))
 
-# === ПРЕДПРОСМОТР ОТЧЕТА ===
+# === Предпросмотр отчета ===
 def preview_report(chat_id):
     data = user_data[chat_id]
     shop = data["shop"]
@@ -192,15 +190,12 @@ def preview_report(chat_id):
 
     bot.send_message(chat_id, report_text, reply_markup=get_confirm_menu())
 
-# === ПОДТВЕРЖДЕНИЕ / ИЗМЕНЕНИЕ / ОТМЕНА ===
+# === Подтверждение ===
 @bot.message_handler(func=lambda m: m.text == "✅ Отправить")
 def confirm_and_send(message):
     chat_id = message.chat.id
     send_report(chat_id)
-    user_data[chat_id]["stage"] = "main"
-    user_data[chat_id]["transfers"] = []
-    user_data[chat_id]["cash"] = 0
-    user_data[chat_id]["terminal"] = 0
+    user_data[chat_id].update({"stage": "main", "transfers": [], "cash": 0, "terminal": 0})
     bot.send_message(chat_id, "✅ Отчёт отправлен.", reply_markup=get_main_menu())
 
 @bot.message_handler(func=lambda m: m.text == "✏️ Изменить данные")
@@ -218,15 +213,15 @@ def change_date(message):
 @bot.message_handler(func=lambda m: user_data.get(m.chat.id, {}).get("stage") == "date_input")
 def set_date(message):
     chat_id = message.chat.id
-    date_str = message.text
     try:
-        datetime.strptime(date_str, "%d.%m.%Y")
-        user_data[chat_id]["date"] = date_str
+        datetime.strptime(message.text, "%d.%m.%Y")
+        user_data[chat_id]["date"] = message.text
         user_data[chat_id]["stage"] = "confirm_report"
         preview_report(chat_id)
     except ValueError:
-        bot.send_message(chat_id, "❌ Неверный формат даты, попробуйте снова:")
+        bot.send_message(chat_id, "❌ Неверный формат даты. Введите ДД.ММ.ГГГГ")
 
+# === Отправка отчёта ===
 def send_report(chat_id):
     data = user_data[chat_id]
     shop = data["shop"]
@@ -239,18 +234,14 @@ def send_report(chat_id):
     if shop == "Янтарь":
         if total < 40000:
             salary = 4000
-            each = salary // 2
         else:
-            each = round_to_50((total * 0.10) / 2)
-            salary = each * 2
+            salary = round_to_50(total * 0.10)
     else:
         salary = max(2000, round_to_50(total * 0.10))
 
-    # Запись в Google Sheets
     row = [date, shop, transfers, cash, terminal, total, salary]
     sheet.append_row(row)
 
-    # Отправка отчёта в чат
     report_msg = (
         f"📦 Магазин: {shop}\n"
         f"📅 Дата: {date}\n"
@@ -260,8 +251,7 @@ def send_report(chat_id):
         f"📊 Итого: {total}₽\n"
         f"👔 Зарплата: {salary}₽"
     )
-
-    bot.send_message(CHAT_ID_FOR_REPORT, report_msg)
+    bot.send_message(CHAT_ID_FOR_REPORT, report_msg, message_thread_id=THREAD_ID_FOR_REPORT)
 
 def run_bot1():
     print("✅ Бот 1 запущен...")
