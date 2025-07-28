@@ -113,14 +113,10 @@ async def top_positions(message: Message):
         result.append(f"{i}. {item} — <b>{count}</b> раз(а)")
     await message.reply("\n".join(result))
 
-# Запуск бота через polling
+# Запуск бота
 async def main():
     dp.include_router(router)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    run_bot2()
-
-    print("✅ Бот 2 запущен...")
-    bot.infinity_polling()
-
+    asyncio.run(main())
