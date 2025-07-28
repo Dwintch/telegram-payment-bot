@@ -119,5 +119,7 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    print("🤖 Бот запущен через polling...")
-    asyncio.run(main())
+def run_bot2():
+    print("✅ Бот 2 запущен...")
+    bot.infinity_polling()
+
