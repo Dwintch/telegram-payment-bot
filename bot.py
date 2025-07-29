@@ -79,6 +79,7 @@ def get_main_menu():
     markup.add("💰 Перевод", "💸 Возврат")
     markup.add("📄 Составить отчёт", "👀 Посмотреть сумму")
     markup.add("📦 Заказы", "🍎 Приём поставки")
+    markup.add("✅ Отправить заказ")
     markup.add("❌ Отменить")
     return markup
 
@@ -99,8 +100,12 @@ def shop_keyboard():
     return keyboard
 
 # =======================
-# Money Report Handlers
+# Start Without /start
 # =======================
+@bot.message_handler(func=lambda m: m.text and m.chat.id not in user_data)
+def auto_start(message):
+    start(message)
+
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
@@ -111,153 +116,66 @@ def start(message):
     }
     bot.send_message(chat_id, "Привет! Выбери режим: учёт или заказы.", reply_markup=get_shop_menu())
 
-@bot.message_handler(func=lambda m: m.text in ["Янтарь", "Хайп", "Полка"])
-def choose_shop(message):
-    chat_id = message.chat.id
-    user_data[chat_id].update({
-        "shop": message.text, "transfers": [], "mode": "add",
-        "cash": 0, "terminal": 0, "stage": "main",
-        "date": datetime.now().strftime("%d.%m.%Y")
-    })
-    bot.send_message(chat_id, f"Выбран магазин: {message.text}", reply_markup=get_main_menu())
+# =======================
+# Заказы
+# =======================
+@bot.message_handler(func=lambda msg: msg.text == "📦 Заказы")
+def handle_orders(msg):
+    user_states[msg.chat.id] = "ordering"
+    orders[msg.chat.id] = []
+    bot.send_message(msg.chat.id, "Отправь позиции (через запятую или с новой строки):", reply_markup=get_main_menu())
 
-@bot.message_handler(func=lambda m: m.text == "💰 Перевод")
-def handle_transfer(message):
-    chat_id = message.chat.id
-    user_data[chat_id]["mode"] = "add"
-    user_data[chat_id]["stage"] = "amount_input"
-    bot.send_message(chat_id, "Введите сумму перевода:")
+@bot.message_handler(func=lambda msg: user_states.get(msg.chat.id) == "ordering")
+def accumulate_order(msg):
+    items = [i.strip() for part in msg.text.split("\n") for i in part.split(",") if i.strip()]
+    orders[msg.chat.id].extend(items)
+    bot.send_message(msg.chat.id, f"Текущий заказ:\n- " + "\n- ".join(orders[msg.chat.id]))
 
-@bot.message_handler(func=lambda m: m.text == "💸 Возврат")
-def handle_return(message):
-    chat_id = message.chat.id
-    user_data[chat_id]["mode"] = "subtract"
-    user_data[chat_id]["stage"] = "amount_input"
-    bot.send_message(chat_id, "Введите сумму возврата:")
-
-@bot.message_handler(func=lambda m: m.text == "👀 Посмотреть сумму")
-def show_total(message):
-    chat_id = message.chat.id
-    total = sum(user_data.get(chat_id, {}).get("transfers", []))
-    count = len(user_data.get(chat_id, {}).get("transfers", []))
-    bot.send_message(chat_id, f"Сумма: {total}₽, Транзакций: {count}")
-
-@bot.message_handler(func=lambda m: m.text == "📄 Составить отчёт")
-def start_report(message):
-    chat_id = message.chat.id
-    user_data[chat_id]["stage"] = "cash_input"
-    total = sum(user_data[chat_id]["transfers"])
-    bot.send_message(chat_id, f"Переводов на: {total}₽. Введите сумму наличных:")
-
-@bot.message_handler(func=lambda m: m.text.isdigit())
-def handle_amount(message):
-    chat_id = message.chat.id
-    stage = user_data[chat_id]["stage"]
-    amount = int(message.text)
-
-    if stage in ["main", "amount_input"]:
-        delta = amount if user_data[chat_id]["mode"] == "add" else -amount
-        user_data[chat_id]["transfers"].append(delta)
-        bot.send_message(chat_id, f"Текущая сумма: {sum(user_data[chat_id]['transfers'])}₽", reply_markup=get_main_menu())
-        user_data[chat_id]["stage"] = "main"
-
-    elif stage == "cash_input":
-        user_data[chat_id]["cash"] = amount
-        user_data[chat_id]["stage"] = "terminal_input"
-        bot.send_message(chat_id, "Введите сумму по терминалу:")
-
-    elif stage == "terminal_input":
-        user_data[chat_id]["terminal"] = amount
-        user_data[chat_id]["stage"] = "confirm_report"
-        preview_report(chat_id)
-
-def preview_report(chat_id):
-    data = user_data[chat_id]
-    shop = data["shop"]
-    transfers = sum(data["transfers"])
-    cash = data["cash"]
-    terminal = data["terminal"]
-    total = transfers + cash + terminal
-
-    salary = round_to_50(total * 0.10)
-    if shop == "Янтарь" and total < 40000:
-        salary = 4000
-
-    text = (
-        f"📦 Магазин: {shop}\n📅 Дата: {data['date']}\n"
-        f"💳 Переводы: {transfers}₽\n💵 Наличные: {cash}₽\n🏧 Терминал: {terminal}₽\n📊 Итого: {total}₽\n👔 ЗП: {salary}₽"
-    )
-    bot.send_message(chat_id, text, reply_markup=get_confirm_menu())
-
-@bot.message_handler(func=lambda m: m.text == "✅ Отправить")
-def confirm_and_send(message):
-    chat_id = message.chat.id
-    send_report(chat_id)
-    bot.send_message(chat_id, "✅ Отчёт отправлен.", reply_markup=get_main_menu())
-
-    user_data[chat_id].update({"transfers": [], "cash": 0, "terminal": 0, "stage": "main"})
-
-def send_report(chat_id):
-    data = user_data[chat_id]
-    row = [data["date"], data["shop"], sum(data["transfers"]), data["cash"], data["terminal"], sum(data["transfers"])+data["cash"]+data["terminal"]]
-    sheet.append_row(row)
-    bot.send_message(CHAT_ID_REPORT, f"Отчёт по магазину {data['shop']} отправлен.", message_thread_id=THREAD_ID_REPORT)
+@bot.message_handler(func=lambda msg: msg.text == "✅ Отправить заказ")
+def send_order(msg):
+    if not orders.get(msg.chat.id):
+        bot.send_message(msg.chat.id, "Заказ пуст. Добавьте позиции перед отправкой.")
+        return
+    order_text = f"🛒 Новый заказ от @{msg.from_user.username or msg.from_user.first_name}:\n" + "\n".join(f"- {item}" for item in orders[msg.chat.id])
+    bot.send_message(chat_id=CHAT_ID_REPORT, text=order_text, message_thread_id=THREAD_ID_ORDERS)
+    bot.send_message(msg.chat.id, "Заказ отправлен!", reply_markup=get_main_menu())
+    orders[msg.chat.id] = []
+    user_states[msg.chat.id] = None
 
 # =======================
-# Order System Handlers (new)
+# Приём поставки
 # =======================
-@bot.message_handler(func=lambda m: m.text == "📦 Заказы")
-def orders_menu(message):
-    user_states[message.from_user.id] = {"state": "choosing_shop"}
-    bot.send_message(message.chat.id, "Выберите магазин:", reply_markup=shop_keyboard())
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("shop_"))
-def shop_chosen(call):
-    user_id = call.from_user.id
-    shop = call.data.split("_")[1]
-    user_states[user_id] = {"state": "collecting_order", "shop": shop, "order": []}
-    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
-                          text=f"Вы выбрали: {shop}\nВведите позиции заказа.\nПишите по одному или через запятую, потом нажмите ✅ Отправить заказ.")
-
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("state") == "collecting_order")
-def collect_order(message):
-    user_id = message.from_user.id
-    state = user_states[user_id]
-    parts = [p.strip() for line in message.text.splitlines() for p in line.split(",") if p.strip()]
-    state["order"].extend(parts)
-    bot.send_message(message.chat.id, f"Добавлено {len(parts)} позиций. Напишите ещё или нажмите ✅ Отправить заказ.")
-
-@bot.message_handler(func=lambda m: m.text == "✅ Отправить заказ")
-def send_accumulated_order(message):
-    user_id = message.from_user.id
-    state = user_states.get(user_id)
-    if not state or not state.get("order"):
-        bot.send_message(message.chat.id, "Нет позиций для отправки.")
+@bot.message_handler(func=lambda msg: msg.text == "🍎 Приём поставки")
+def receive_delivery(msg):
+    chat_id = msg.chat.id
+    if not orders.get(chat_id):
+        bot.send_message(chat_id, "Нет активных заказов.")
         return
 
-    shop = state["shop"]
-    positions = state["order"]
-    orders[shop].extend(positions)
-    position_counter.update(positions)
-    save_counter()
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for idx, item in enumerate(orders[chat_id]):
+        markup.add(types.InlineKeyboardButton(text=f"✅ {item}", callback_data=f"recv_{idx}"))
+    markup.add(types.InlineKeyboardButton(text="🚚 Завершить приём", callback_data="recv_done"))
 
-    formatted = "\n".join(f"▪️ {p}" for p in positions)
-    bot.send_message(message.chat.id, f"✅ Заказ для {shop} отправлен:\n{formatted}")
-    bot.send_message(CHAT_ID_REPORT, f"🛒 Новый заказ для {shop}:\n{formatted}", message_thread_id=THREAD_ID_ORDERS)
-    user_states.pop(user_id)
+    bot.send_message(chat_id, "Выберите, что пришло:", reply_markup=markup)
 
-@bot.message_handler(func=lambda m: m.text == "🍎 Приём поставки")
-def start_delivery_check(message):
-    user_id = message.from_user.id
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("✅ Всё приехало", "❌ Что-то не приехало")
-    bot.send_message(message.chat.id, "Что приехало из последнего заказа?", reply_markup=markup)
+@bot.callback_query_handler(func=lambda call: call.data.startswith("recv_"))
+def handle_receive_callback(call):
+    chat_id = call.message.chat.id
+    if call.data == "recv_done":
+        if orders.get(chat_id):
+            bot.send_message(chat_id, "Следующие позиции не были доставлены и перенесены:")
+            bot.send_message(chat_id, "\n".join(f"- {item}" for item in orders[chat_id]))
+        else:
+            bot.send_message(chat_id, "Все позиции были доставлены!")
+        return
 
-@bot.message_handler(commands=["топ_позиции"])
-def top_positions(message):
-    top = position_counter.most_common(10)
-    result = [f"{i+1}. {item} — {count} раз(а)" for i, (item, count) in enumerate(top)]
-    bot.send_message(message.chat.id, "\n".join(result) or "Нет заказов.")
+    idx = int(call.data.split("_")[1])
+    if chat_id in orders and 0 <= idx < len(orders[chat_id]):
+        item = orders[chat_id].pop(idx)
+        bot.answer_callback_query(call.id, f"{item} — принято")
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        receive_delivery(call.message)
 
 # =======================
 # Start Bot
