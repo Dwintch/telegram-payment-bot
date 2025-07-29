@@ -83,7 +83,7 @@ def handle_any_message(message):
     chat_id = message.chat.id
     text = message.text.strip()
 
-    # Обработка команды /start - сброс состояния и главное меню
+    # Обработка команды /start - сброс состояния и переход к выбору магазина
     if text == "/start":
         user_data[chat_id] = {
             "shop": None,
@@ -92,7 +92,7 @@ def handle_any_message(message):
             "mode": "add",
             "cash": 0,
             "terminal": 0,
-            "stage": "main",
+            "stage": "choose_shop",
             "date": datetime.now().strftime("%d.%m.%Y"),
             "order_items": [],
             "order_photos": [],
@@ -101,7 +101,7 @@ def handle_any_message(message):
             "last_order": [],
             "saved_order": []
         }
-        bot.send_message(chat_id, "Добро пожаловать! Главное меню:", reply_markup=get_main_menu())
+        bot.send_message(chat_id, "Добро пожаловать! Пожалуйста, выберите магазин для заказа:", reply_markup=get_shop_menu())
         return
 
     # Инициализация данных пользователя если нет
