@@ -78,7 +78,7 @@ def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("💰 Перевод", "💸 Возврат")
     markup.add("📄 Составить отчёт", "👀 Посмотреть сумму")
-    markup.add("📦 Заказы")
+    markup.add("📦 Заказы", "🍎 Приём поставки")
     markup.add("❌ Отменить")
     return markup
 
@@ -204,7 +204,7 @@ def send_report(chat_id):
     bot.send_message(CHAT_ID_REPORT, f"Отчёт по магазину {data['shop']} отправлен.", message_thread_id=THREAD_ID_REPORT)
 
 # =======================
-# Order System Handlers
+# Order System Handlers (new)
 # =======================
 @bot.message_handler(func=lambda m: m.text == "📦 Заказы")
 def orders_menu(message):
@@ -215,22 +215,43 @@ def orders_menu(message):
 def shop_chosen(call):
     user_id = call.from_user.id
     shop = call.data.split("_")[1]
-    user_states[user_id] = {"state": "writing_order", "shop": shop}
-    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"Вы выбрали: {shop}\nВведите заказ:")
+    user_states[user_id] = {"state": "collecting_order", "shop": shop, "order": []}
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
+                          text=f"Вы выбрали: {shop}\nВведите позиции заказа.\nПишите по одному или через запятую, потом нажмите ✅ Отправить заказ.")
 
-@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("state") == "writing_order")
-def receive_order(message):
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("state") == "collecting_order")
+def collect_order(message):
     user_id = message.from_user.id
-    shop = user_states[user_id]["shop"]
-    positions = [p.strip() for p in message.text.split("\n") if p.strip()]
+    state = user_states[user_id]
+    parts = [p.strip() for line in message.text.splitlines() for p in line.split(",") if p.strip()]
+    state["order"].extend(parts)
+    bot.send_message(message.chat.id, f"Добавлено {len(parts)} позиций. Напишите ещё или нажмите ✅ Отправить заказ.")
+
+@bot.message_handler(func=lambda m: m.text == "✅ Отправить заказ")
+def send_accumulated_order(message):
+    user_id = message.from_user.id
+    state = user_states.get(user_id)
+    if not state or not state.get("order"):
+        bot.send_message(message.chat.id, "Нет позиций для отправки.")
+        return
+
+    shop = state["shop"]
+    positions = state["order"]
     orders[shop].extend(positions)
     position_counter.update(positions)
     save_counter()
 
     formatted = "\n".join(f"▪️ {p}" for p in positions)
-    bot.send_message(message.chat.id, f"Заказ для {shop}:\n{formatted}", parse_mode="HTML")
-    bot.send_message(CHAT_ID_REPORT, f"🛒 Новый заказ для {shop}:\n{formatted}", parse_mode="HTML", message_thread_id=THREAD_ID_ORDERS)
+    bot.send_message(message.chat.id, f"✅ Заказ для {shop} отправлен:\n{formatted}")
+    bot.send_message(CHAT_ID_REPORT, f"🛒 Новый заказ для {shop}:\n{formatted}", message_thread_id=THREAD_ID_ORDERS)
     user_states.pop(user_id)
+
+@bot.message_handler(func=lambda m: m.text == "🍎 Приём поставки")
+def start_delivery_check(message):
+    user_id = message.from_user.id
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("✅ Всё приехало", "❌ Что-то не приехало")
+    bot.send_message(message.chat.id, "Что приехало из последнего заказа?", reply_markup=markup)
 
 @bot.message_handler(commands=["топ_позиции"])
 def top_positions(message):
