@@ -114,7 +114,16 @@ def start(message):
         "cash": 0, "terminal": 0, "stage": "choose_shop",
         "date": datetime.now().strftime("%d.%m.%Y")
     }
-    bot.send_message(chat_id, "Привет! Выбери режим: учёт или заказы.", reply_markup=get_shop_menu())
+    bot.send_message(chat_id, "Привет! Выбери режим: учёт или заказы.", reply_markup=shop_keyboard())
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("shop_"))
+def handle_shop_selection(call):
+    chat_id = call.message.chat.id
+    selected_shop = call.data.split("_")[1]
+    user_data[chat_id]["shop"] = selected_shop
+    bot.answer_callback_query(call.id, f"Выбран магазин: {selected_shop.capitalize()}")
+    bot.send_message(chat_id, f"Магазин *{selected_shop.capitalize()}* выбран.\nВыберите действие:", 
+                     parse_mode="Markdown", reply_markup=get_main_menu())
 
 # =======================
 # Заказы
