@@ -411,4 +411,5 @@ def send_order(chat_id):
     user["last_order"] = items.copy()
 
 # === ЗАПУСК БОТА ===
-print("✅ Бот запущен
+print("✅ Бот запущен...")
+bot.infinity_polling()
