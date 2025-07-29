@@ -432,4 +432,3 @@ def send_order(chat_id):
 
 # === ЗАПУСК БОТА ===
 print("✅ Бот запущен...")
-bot.infinity_polling()
