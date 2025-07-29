@@ -121,6 +121,7 @@ def handle_shop_selection(call):
     chat_id = call.message.chat.id
     selected_shop = call.data.split("_")[1]
     user_data[chat_id]["shop"] = selected_shop
+    user_states[chat_id] = None
     bot.answer_callback_query(call.id, f"Выбран магазин: {selected_shop.capitalize()}")
     bot.send_message(chat_id, f"Магазин *{selected_shop.capitalize()}* выбран.\nВыберите действие:", 
                      parse_mode="Markdown", reply_markup=get_main_menu())
@@ -185,6 +186,29 @@ def handle_receive_callback(call):
         bot.answer_callback_query(call.id, f"{item} — принято")
         bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
         receive_delivery(call.message)
+
+# =======================
+# Универсальный обработчик для цифр и текста
+# =======================
+@bot.message_handler(func=lambda msg: True)
+def universal_handler(msg):
+    chat_id = msg.chat.id
+    text = msg.text.strip()
+
+    if chat_id not in user_data:
+        start(msg)
+        return
+
+    if text.replace(".", "", 1).isdigit():
+        amount = float(text)
+        user_data[chat_id]["transfers"].append(amount)
+        bot.send_message(chat_id, f"✅ Учтён перевод: {amount:.2f}")
+    elif user_states.get(chat_id) == "ordering":
+        accumulate_order(msg)
+    else:
+        user_states[chat_id] = "ordering"
+        orders[chat_id].extend([text])
+        bot.send_message(chat_id, f"Добавлено в заказ:\n- {text}")
 
 # =======================
 # Start Bot
