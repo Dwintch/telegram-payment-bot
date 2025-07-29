@@ -42,6 +42,7 @@ def get_main_menu():
 def get_shop_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("Янтарь", "Хайп", "Полка")
+    markup.add("⬅️ Назад")
     return markup
 
 def get_confirm_menu():
@@ -82,8 +83,8 @@ def handle_any_message(message):
     chat_id = message.chat.id
     text = message.text.strip()
 
-    # Инициализация данных пользователя
-    if chat_id not in user_data:
+    # Обработка команды /start - сброс состояния и главное меню
+    if text == "/start":
         user_data[chat_id] = {
             "shop": None,
             "order_shop": None,
@@ -91,7 +92,7 @@ def handle_any_message(message):
             "mode": "add",
             "cash": 0,
             "terminal": 0,
-            "stage": "choose_shop",
+            "stage": "main",
             "date": datetime.now().strftime("%d.%m.%Y"),
             "order_items": [],
             "order_photos": [],
@@ -100,8 +101,27 @@ def handle_any_message(message):
             "last_order": [],
             "saved_order": []
         }
-        bot.send_message(chat_id, "Ну что, поcчитаем копеечки! Выбери магазин:", reply_markup=get_shop_menu())
+        bot.send_message(chat_id, "Добро пожаловать! Главное меню:", reply_markup=get_main_menu())
         return
+
+    # Инициализация данных пользователя если нет
+    if chat_id not in user_data:
+        user_data[chat_id] = {
+            "shop": None,
+            "order_shop": None,
+            "transfers": [],
+            "mode": "add",
+            "cash": 0,
+            "terminal": 0,
+            "stage": "main",
+            "date": datetime.now().strftime("%d.%m.%Y"),
+            "order_items": [],
+            "order_photos": [],
+            "order_date": None,
+            "pending_delivery": [],
+            "last_order": [],
+            "saved_order": []
+        }
 
     user = user_data[chat_id]
 
@@ -123,13 +143,22 @@ def handle_any_message(message):
         return
 
     # Выбор магазина для заказа
-    if user["stage"] == "choose_shop" and text in ["Янтарь", "Хайп", "Полка"]:
-        user["order_shop"] = text
-        user["order_items"] = []
-        user["order_photos"] = []
-        user["stage"] = "order_input"
-        bot.send_message(chat_id, f"Выбран магазин для заказа: <b>{text}</b>\nВведите товары через запятую:", reply_markup=None)
-        return
+    if user["stage"] == "choose_shop":
+        allowed_shops = ["Янтарь", "Хайп", "Полка"]
+        if text in allowed_shops:
+            user["order_shop"] = text
+            user["order_items"] = []
+            user["order_photos"] = []
+            user["stage"] = "order_input"
+            bot.send_message(chat_id, f"Выбран магазин для заказа: <b>{text}</b>\nВведите товары через запятую:", reply_markup=None)
+            return
+        elif text == "⬅️ Назад":
+            user["stage"] = "main"
+            bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=get_main_menu())
+            return
+        else:
+            bot.send_message(chat_id, "Пожалуйста, выберите магазин из меню или нажмите '⬅️ Назад'.", reply_markup=get_shop_menu())
+            return
 
     # Ввод товаров в заказ
     if user["stage"] == "order_input":
@@ -215,7 +244,7 @@ def handle_any_message(message):
     # === БЛОК ФИНАНСОВ И ПРОЧЕГО ===
 
     # Переключение магазина для переводов (если на главном экране)
-    if text in ["Янтарь", "Хайп", "Полка"]:
+    if text in ["Янтарь", "Хайп", "Полка"] and user["stage"] == "main":
         user.update({
             "shop": text,
             "transfers": [],
@@ -376,44 +405,23 @@ def send_report(chat_id):
     report = (
         f"📦 Магазин: {data['shop']}\n"
         f"📅 Дата: {data['date']}\n"
-        f"💳 Переводы: {row[2]}₽\n"
-        f"💵 Наличные: {row[3]}₽\n"
-        f"🏧 Терминал: {row[4]}₽\n"
+        f"💳 Переводы: {sum(data['transfers'])}₽\n"
+        f"💵 Наличные: {data['cash']}₽\n"
+        f"🏧 Терминал: {data['terminal']}₽\n"
         f"📊 Итого: {total}₽"
     )
-    bot.send_message(CHAT_ID_FOR_REPORT, report, message_thread_id=THREAD_ID_FOR_REPORT)
-    user_data[chat_id] = {
-        "shop": user_data[chat_id]["shop"],  # сохраняем магазин перевода
-        "order_shop": None,
-        "transfers": [],
-        "mode": "add",
-        "cash": 0,
-        "terminal": 0,
-        "stage": "main",
-        "date": datetime.now().strftime("%d.%m.%Y"),
-        "order_items": [],
-        "order_photos": [],
-        "order_date": None,
-        "pending_delivery": [],
-        "last_order": [],
-        "saved_order": []
-    }
-    bot.send_message(chat_id, "✅ Отчёт отправлен! Выберите действие:", reply_markup=get_main_menu())
+    bot.send_message(chat_id, report)
 
 def send_order(chat_id):
-    user = user_data[chat_id]
+    user = user_data.get(chat_id, {})
     items = user.get("order_items", [])
     photos = user.get("order_photos", [])
-    shop = user.get("order_shop") or user.get("shop") or "Не указан"
-    date = user.get("order_date") or datetime.now().strftime("%d.%m.%Y")
 
-    if not items and not photos:
-        bot.send_message(chat_id, "⚠️ Нельзя отправить пустой заказ.")
+    if not items:
+        bot.send_message(chat_id, "⚠️ Пустой заказ, нечего отправлять.")
         return
 
-    message = f"🛍 Новый заказ:\n📦 Магазин: {shop}\n📅 Дата заказа: {date}\n"
-    if items:
-        message += "\n" + "\n".join(f"• {item}" for item in items)
+    message = f"📦 Новый заказ из магазина <b>{user.get('order_shop','Не выбран')}</b>:\n" + "\n".join(f"• {item}" for item in items)
 
     bot.send_message(CHAT_ID_FOR_REPORT, message, message_thread_id=THREAD_ID_FOR_ORDER)
     for file_id in photos:
