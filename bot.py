@@ -46,7 +46,7 @@ def get_shop_menu():
 
 def get_confirm_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("✅ Отправить", "✏️ Изменить данные", "🗓 Изменить дату", "❌ Отмена")
+    markup.add("✅ Отправить", "✏️ Изменить данные", "❌ Отмена")
     return markup
 
 # === ВСПОМОГАТЕЛЬНЫЕ ===
@@ -71,7 +71,7 @@ def handle_any_message(message):
     chat_id = message.chat.id
     text = message.text.strip()
 
-    # Инициализация данных пользователя
+    # Инициализация данных пользователя, если нет
     if chat_id not in user_data:
         user_data[chat_id] = {
             "shop": None,                # магазин для переводов
@@ -167,7 +167,11 @@ def handle_any_message(message):
         return
 
     if text == "❌ Отменить":
+        # Отмена текущего действия, очистка временных данных заказа, возвращаемся на main
         user.update({"mode": "add", "cash": 0, "terminal": 0, "stage": "main"})
+        user["order_items"] = []
+        user["order_photos"] = []
+        user["order_date"] = None
         bot.send_message(chat_id, "❌ Действие отменено. Выберите действие:", reply_markup=get_main_menu())
         return
 
@@ -219,22 +223,7 @@ def handle_any_message(message):
         bot.send_message(chat_id, "Сколько наличных?:")
         return
 
-    if text == "🗓 Изменить дату":
-        user["stage"] = "custom_date_input"
-        bot.send_message(chat_id, "Введите дату отчёта в формате ДД.ММ.ГГГГ:")
-        return
-
-    # Обработка ввода даты отчёта
-    if user["stage"] == "custom_date_input":
-        try:
-            custom_date = datetime.strptime(text, "%d.%m.%Y")
-            user["date"] = custom_date.strftime("%d.%m.%Y")
-            user["stage"] = "confirm_report"
-            bot.send_message(chat_id, f"✅ Дата изменена на: <b>{user['date']}</b>")
-            preview_report(chat_id)
-        except ValueError:
-            bot.send_message(chat_id, "⚠️ Неверный формат даты. Введите в формате ДД.ММ.ГГГГ:")
-        return
+    # Убрали кнопку "Изменить дату", значит и обработку убираем
 
     # Обработка цифрового ввода — суммы
     if text.isdigit():
@@ -273,6 +262,17 @@ def handle_any_message(message):
     # Если на этапе подтверждения отчёта - просто проигнорим
     if user["stage"] == "confirm_report":
         bot.send_message(chat_id, "Используйте кнопки меню для дальнейших действий.")
+        return
+
+    # Если на этапе подтверждения доставки (подтверждение что приехало)
+    if user["stage"] == "delivery_confirm":
+        arrived_items = sanitize_input(text)
+        # Удаляем из pending_delivery те, что приехали
+        for item in arrived_items:
+            if item in user["pending_delivery"]:
+                user["pending_delivery"].remove(item)
+        bot.send_message(chat_id, "✅ Поставка подтверждена.")
+        user["stage"] = "main"
         return
 
     # На всякий случай: любое неизвестное сообщение
