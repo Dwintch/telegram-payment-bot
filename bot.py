@@ -400,6 +400,8 @@ def handle_any_message(message):
     bot.send_message(chat_id, "❓ Неизвестная команда. Выберите действие:", reply_markup=get_main_menu())
 
 # === ФУНКЦИИ ОТПРАВКИ ===
+THREAD_ID_FOR_ORDER = 64  # Убедись, что это определено в начале файла
+
 def send_order(chat_id):
     user = user_data[chat_id]
     shop = user.get("order_shop", "Неизвестный магазин")
@@ -409,10 +411,21 @@ def send_order(chat_id):
     text = f"🛒 Новый заказ из магазина <b>{shop}</b>:\n"
     text += "\n".join(f"• {item}" for item in order_items)
 
-    bot.send_message(CHAT_ID_FOR_REPORT, text, disable_web_page_preview=True)
+    bot.send_message(
+        CHAT_ID_FOR_REPORT,
+        text,
+        message_thread_id=THREAD_ID_FOR_ORDER,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
 
     for photo in order_photos:
-        bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=photo["caption"] or None)
+        bot.send_photo(
+            CHAT_ID_FOR_REPORT,
+            photo["file_id"],
+            caption=photo.get("caption") or None,
+            message_thread_id=THREAD_ID_FOR_ORDER,
+        )
 
     user["last_order"] = order_items.copy()
 
