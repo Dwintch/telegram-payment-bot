@@ -368,6 +368,15 @@ def handle_any_message(message):
     # Обработка числового ввода (суммы и т.п.)
     if text.isdigit():
         amount = int(text)
+        # === Добавлено: если мы на главном меню и просто ввели число — добавляем перевод ===
+        if user["stage"] == "main":
+            user["transfers"].append(amount)
+            bot.send_message(chat_id, f"✅ Добавлено в переводы: {amount}₽")
+            total = sum(user["transfers"])
+            bot.send_message(chat_id, f"💰 Текущая сумма: <b>{total}₽</b>", reply_markup=get_main_menu())
+            return
+        # === Конец добавления ===
+
         if user["stage"] == "amount_input":
             user["transfers"].append(-amount if user["mode"] == "subtract" else amount)
             bot.send_message(chat_id, f"{'➖ Возврат' if user['mode']=='subtract' else '✅ Добавлено'}: {amount}₽")
@@ -398,7 +407,7 @@ def handle_any_message(message):
 
     if user["stage"] == "confirm_report" and text == "✏️ Изменить данные":
         user["stage"] = "cash_input"
-        bot.send_message(chat_id, "Сколько наличных?:")
+        bot.send_message(chat_id, "Введите сумму наличных:")
         return
 
     if user["stage"] == "confirm_report" and text == "❌ Отмена":
@@ -406,10 +415,10 @@ def handle_any_message(message):
         bot.send_message(chat_id, "❌ Отмена. Выберите действие:", reply_markup=get_main_menu())
         return
 
-    # Во всех прочих случаях, если команда не распознана
-    if user["stage"] != "order_input":
-        bot.send_message(chat_id, "❓ Неизвестная команда. Выберите действие:", reply_markup=get_main_menu())
+    # Если не попали ни в один из сценариев
+    bot.send_message(chat_id, "❓ Неизвестная команда. Выберите действие:", reply_markup=get_main_menu())
 
+# === ФУНКЦИИ ОТПРАВКИ ===
 
 def send_order(chat_id):
     user = user_data[chat_id]
@@ -420,16 +429,12 @@ def send_order(chat_id):
     text = f"🛒 Новый заказ из магазина <b>{shop}</b>:\n"
     text += "\n".join(f"• {item}" for item in order_items)
 
-    # Отправляем заказ в чат (например, в группу для заказов)
     bot.send_message(CHAT_ID_FOR_REPORT, text, disable_web_page_preview=True)
 
-    # Отправляем фото (если есть)
     for photo in order_photos:
         bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=photo["caption"] or None)
 
-    # Запоминаем последний заказ для приемки
     user["last_order"] = order_items.copy()
-
 
 def preview_report(chat_id):
     user = user_data[chat_id]
@@ -459,7 +464,6 @@ def send_report(chat_id):
 
     bot.send_message(CHAT_ID_FOR_REPORT, text)
 
-    # Можно добавить запись в Google Sheets
     try:
         sheet.append_row([date, shop, total_transfers, cash, terminal])
     except Exception as e:
