@@ -15,9 +15,9 @@ load_dotenv()
 
 # === НАСТРОЙКИ ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID_FOR_REPORT = -1002826712980
-THREAD_ID_FOR_REPORT = 3
-THREAD_ID_FOR_ORDER = 4
+CHAT_ID_FOR_REPORT = -1002826712980  # чат куда отправляем
+THREAD_ID_FOR_REPORT = 3              # тред для отчётов
+THREAD_ID_FOR_ORDER = 64              # тред для заказов
 GOOGLE_SHEET_NAME = 'Отчёты'
 CREDENTIALS_FILE = 'credentials.json'
 
