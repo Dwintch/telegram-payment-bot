@@ -182,7 +182,7 @@ def handle_any_message(message):
             bot.send_message(chat_id, "Пожалуйста, выберите магазин из меню или нажмите '⬅️ Назад'.", reply_markup=get_shop_menu())
             return
 
-    if user["stage"] == "order_input" and text and text not in ["✅ Отправить заказ", "✏️ Изменить заказ", "💾 Сохранить заказ (не отправлять)", "❌ Отмена"]:
+    if user["stage"] == "order_input" and text and text not in ["✅ Отправить заказ", "✏️ Изменить заказ", "💾 Сохранить заказ (не отправить)", "❌ Отмена"]:
         # Добавляем товары в заказ
         items = sanitize_input(text)
         if items:
@@ -198,6 +198,12 @@ def handle_any_message(message):
         if not user["order_items"]:
             bot.send_message(chat_id, "⚠️ Заказ пуст, нечего отправлять.")
             return
+        # Отправляем предупреждение перед отправкой
+        warning_text = (
+            "📢 Внимание! Если в заказе есть фото, они будут отправлены отдельно с подписью.\n"
+            "Отправляем заказ..."
+        )
+        bot.send_message(chat_id, warning_text)
         send_order(chat_id)
         user["saved_order"] = []
         user["order_items"] = []
@@ -217,7 +223,7 @@ def handle_any_message(message):
         user["stage"] = "order_edit"
         return
 
-    if text == "💾 Сохранить заказ (не отправлять)":
+    if text == "💾 Сохранить заказ (не отправить)":
         if not user["order_items"]:
             bot.send_message(chat_id, "⚠️ Заказ пуст, нечего сохранять.")
             return
@@ -400,8 +406,7 @@ def handle_any_message(message):
 
 # === ФУНКЦИИ ===
 def round_to_50(value):
-    remainder = value % 50
-    return int(value - remainder) if remainder < 25 else int(value + (50 - remainder))
+    return int(round(value / 50) * 50)
 
 def preview_report(chat_id):
     data = user_data[chat_id]
@@ -447,6 +452,8 @@ def send_order(chat_id):
         return
     text = f"🛒 Новый заказ для магазина <b>{shop}</b>:\n"
     text += "\n".join(f"• {item}" for item in items)
+    # Добавляем предупреждение в заказ
+    text += "\n\n📢 Внимание! Фото товара будут отправлены отдельно с подписью."
     sent = bot.send_message(CHAT_ID_FOR_REPORT, text, message_thread_id=THREAD_ID_FOR_ORDER)
     # Отправляем фото под заказом, если есть
     for file_id in photos:
