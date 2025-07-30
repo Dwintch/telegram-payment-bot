@@ -180,7 +180,10 @@ def handle_any_message(message):
     # --- Обработка числового ввода ---
     if text.isdigit():
         amount = int(text)
-        if user["stage"] == "amount_input":
+
+        # Ввод суммы в режиме amount_input или main (добавляем перевод)
+        if user["stage"] in ["amount_input", "main"]:
+            # Важно: если в main и число — тоже добавляем перевод (твоя фича)
             user["transfers"].append(-amount if user["mode"] == "subtract" else amount)
             bot.send_message(chat_id, f"{'➖ Возврат' if user['mode']=='subtract' else '✅ Добавлено'}: {amount}₽")
             total = sum(user["transfers"])
@@ -188,6 +191,7 @@ def handle_any_message(message):
             user["mode"] = "add"
             user["stage"] = "main"
             return
+
         elif user["stage"] == "cash_input":
             user["cash"] = amount
             user["stage"] = "terminal_input"
@@ -342,8 +346,8 @@ def handle_any_message(message):
             bot.send_message(chat_id, "Нет отложенных товаров на поставку.")
         return
 
-    # --- Иная логика: предупреждение, если не распознано ---
-    if user["stage"] != "order_input":
+    # --- Если ввод не распознан и не в режиме ввода заказа, выдаём меню ---
+    if user["stage"] not in ["order_input", "order_edit", "amount_input", "cash_input", "terminal_input", "confirm_report"]:
         bot.send_message(chat_id, "⚠️ Выберите действие из меню.", reply_markup=get_main_menu())
         return
 
@@ -386,7 +390,6 @@ def send_report(chat_id):
         f"🏧 Терминал: {data['terminal']}₽\n"
         f"📊 Итого: {total}₽"
     )
-    # Отправляем в чат отчёт
     bot.send_message(CHAT_ID_FOR_REPORT, report, message_thread_id=THREAD_ID_FOR_REPORT)
 
 def send_order(chat_id):
