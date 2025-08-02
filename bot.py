@@ -206,7 +206,7 @@ def start(message):
     }
     bot.send_message(chat_id, "Привет! Выберите магазин для переводов:", reply_markup=get_shop_menu())
 
-# === ВЫБОР МАГАЗИНА ===
+# Выбор магазина — устанавливаем stage wait_for_employee
 @bot.message_handler(func=lambda m: m.text in ["Янтарь", "Хайп", "Полка"])
 def choose_shop(message):
     chat_id = message.chat.id
@@ -219,8 +219,8 @@ def choose_shop(message):
             "mode": "add",
             "cash": 0,
             "terminal": 0,
-            "stage": "wait_for_employee",  # <-- меняем с "main" на "wait_for_employee"
-            "employee": None,              # <-- добавляем поле для выбранного сотрудника
+            "stage": "wait_for_employee",  # Переходим к выбору сотрудника
+            "employee": None,
             "date": datetime.now().strftime("%d.%m.%Y"),
             "order_shop": None,
             "order_items": [],
@@ -229,8 +229,24 @@ def choose_shop(message):
             "pending_delivery": [],
             "accepted_delivery": []
         })
-        ask_for_employee(chat_id)  # вызываем выбор сотрудника после выбора магазина
+        ask_for_employee(chat_id)  # Просим выбрать сотрудника
         return
+
+    # Здесь остальной код выбора магазинов для заказа и приемки...
+
+# Обработчик выбора сотрудника
+@bot.message_handler(func=lambda message: user_data.get(message.chat.id, {}).get("stage") == "wait_for_employee")
+def handle_employee_selection(message):
+    chat_id = message.chat.id
+    selected_employee = message.text.strip()
+    if selected_employee not in employees:
+        bot.send_message(chat_id, "❌ Такого сотрудника нет в списке. Попробуйте снова.")
+        ask_for_employee(chat_id)  # Предлагаем выбрать снова
+        return
+    user_data[chat_id]["employee"] = selected_employee
+    user_data[chat_id]["stage"] = "main"  # Переходим в главное меню
+    bot.send_message(chat_id, f"✅ Выбран сотрудник: {selected_employee}", reply_markup=get_main_menu())
+
 
     # Дальнейшая логика выбора магазина для заказов и приемок и т.п.
     # (оставьте по необходимости)
