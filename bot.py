@@ -128,9 +128,10 @@ def handle_employee_selection(message):
         bot.send_message(chat_id, "❌ Такого сотрудника нет в списке. Попробуйте снова.")
         return
     user_data[chat_id]["employee"] = selected_employee
-    user_data[chat_id]["stage"] = "wait_for_transfer"  # или следующий шаг
+    user_data[chat_id]["stage"] = "main"  # Ставим стадию на "main" — основной экран
     bot.send_message(chat_id, f"✅ Выбран сотрудник: {selected_employee}", reply_markup=types.ReplyKeyboardRemove())
-    ask_for_transfer(chat_id)  # это функция, которая уже вызывается после магазина
+    bot.send_message(chat_id, "Выберите действие:", reply_markup=get_main_menu())
+
 
 
 
