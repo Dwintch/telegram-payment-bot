@@ -30,6 +30,16 @@ client = gspread.authorize(creds)
 sheet = client.open(GOOGLE_SHEET_NAME).sheet1
 
 # === КНОПКИ ===
+
+@bot.message_handler(commands=["start"])
+def start_command(message):
+    chat_id = message.chat.id
+    user_data[chat_id] = {
+        "stage": "choose_shop"
+    }
+    bot.send_message(chat_id, "🏪 Выберите магазин:", reply_markup=get_shop_keyboard())
+
+
 def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("💰 Перевод", "💸 Возврат")
