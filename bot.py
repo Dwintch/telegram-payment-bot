@@ -474,8 +474,19 @@ def send_report(chat_id):
         f"📊 Итого: {transfers + cash + terminal}₽"
     )
 
-    sheet.append_row([date, shop, transfers, cash, terminal])
+    try:
+        sheet.append_row([date, shop, transfers, cash, terminal])
+    except Exception as e:
+        print(f"Ошибка записи в таблицу: {e}")
+        bot.send_message(chat_id, "❌ Ошибка при записи в таблицу.")
+        return
+
     bot.send_message(CHAT_ID_FOR_REPORT, report_text, message_thread_id=THREAD_ID_FOR_REPORT)
+
+    # Сброс состояния и возврат главного меню
+    user_data[chat_id]["stage"] = "main"
+    bot.send_message(chat_id, "✅ Отчёт отправлен!", reply_markup=get_main_menu())
+
 
 # === ОТПРАВКА ЗАКАЗА В ТЕЛЕГРАМ ===
 def send_order(chat_id):
