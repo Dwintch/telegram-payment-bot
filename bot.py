@@ -522,6 +522,12 @@ def handle_any_message(message):
             bot.send_message(chat_id, "Отмена подтверждения отчёта.", reply_markup=get_main_menu())
             return
 
+    # === я хз вьебу его сюда ===
+    
+@bot.message_handler(func=lambda m: m.text == "📤 Отправить отчёт")
+def handle_send_report(message):
+    send_report(message.chat.id)
+
     # === ВВОД КАСТОМНОЙ ДАТЫ ===
     if user.get("stage") == "custom_date_input":
         try:
