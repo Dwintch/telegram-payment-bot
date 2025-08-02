@@ -30,16 +30,6 @@ client = gspread.authorize(creds)
 sheet = client.open(GOOGLE_SHEET_NAME).sheet1
 
 # === КНОПКИ ===
-
-@bot.message_handler(commands=["start"])
-def start_command(message):
-    chat_id = message.chat.id
-    user_data[chat_id] = {
-        "stage": "choose_shop"
-    }
-    bot.send_message(chat_id, "🏪 Выберите магазин:", reply_markup=get_shop_keyboard())
-
-
 def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("💰 Перевод", "💸 Возврат")
@@ -63,90 +53,6 @@ def get_order_action_menu():
     markup.add("✅ Отправить заказ", "✏️ Изменить заказ")
     markup.add("💾 Сохранить заказ (не отправлять)", "❌ Отмена")
     return markup
-
-# === Работа с сотрудниками ===
-
-EMPLOYEE_FILE = "employees.json"
-
-def load_employees():
-    if not os.path.exists(EMPLOYEE_FILE):
-        with open(EMPLOYEE_FILE, "w", encoding="utf-8") as f:
-            json.dump([], f)
-    with open(EMPLOYEE_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_employees(employees):
-    with open(EMPLOYEE_FILE, "w", encoding="utf-8") as f:
-        json.dump(employees, f, ensure_ascii=False, indent=2)
-
-employees = load_employees()
-
-@bot.message_handler(commands=["add_employee"])
-def add_employee(message):
-    chat_id = message.chat.id
-    bot.send_message(chat_id, "Введите имя нового сотрудника:")
-    bot.register_next_step_handler(message, save_new_employee)
-
-def save_new_employee(message):
-    name = message.text.strip()
-    if name:
-        employees.append(name)
-        save_employees(employees)
-        bot.send_message(message.chat.id, f"✅ Сотрудник «{name}» добавлен.")
-    else:
-        bot.send_message(message.chat.id, "❌ Имя не может быть пустым.")
-
-@bot.message_handler(commands=["remove_employee"])
-def remove_employee(message):
-    if not employees:
-        bot.send_message(message.chat.id, "Список сотрудников пуст.")
-        return
-
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    for emp in employees:
-        markup.add(emp)
-    bot.send_message(message.chat.id, "Выберите сотрудника для удаления:", reply_markup=markup)
-    bot.register_next_step_handler(message, confirm_remove_employee)
-
-def confirm_remove_employee(message):
-    name = message.text.strip()
-    if name in employees:
-        employees.remove(name)
-        save_employees(employees)
-        bot.send_message(message.chat.id, f"❌ Сотрудник «{name}» удалён.", reply_markup=types.ReplyKeyboardRemove())
-    else:
-        bot.send_message(message.chat.id, "❌ Такого сотрудника нет.", reply_markup=types.ReplyKeyboardRemove())
-
-
- # === ДОБАВЛЯЕМ ШАГ ВЫБОРА СОТРУДНИКА ===
-def ask_for_employee(chat_id):
-    if not employees:
-        bot.send_message(chat_id, "⚠️ Список сотрудников пуст. Добавьте сотрудника командой /add_employee")
-        return
-
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    for emp in employees:
-        markup.add(emp)
-    user_data[chat_id]["stage"] = "wait_for_employee"
-    bot.send_message(chat_id, "👤 Выберите сотрудника на смене:", reply_markup=markup)
-
-@bot.message_handler(func=lambda message: user_data.get(message.chat.id, {}).get("stage") == "wait_for_employee")
-def handle_employee_selection(message):
-    chat_id = message.chat.id
-    selected_employee = message.text.strip()
-    if selected_employee not in employees:
-        bot.send_message(chat_id, "❌ Такого сотрудника нет в списке. Попробуйте снова.")
-        return
-    user_data[chat_id]["employee"] = selected_employee
-    user_data[chat_id]["stage"] = "main"  # Ставим стадию на "main" — основной экран
-    bot.send_message(chat_id, f"✅ Выбран сотрудник: {selected_employee}", reply_markup=types.ReplyKeyboardRemove())
-    bot.send_message(chat_id, "Выберите действие:", reply_markup=get_main_menu())
-
-
-
-
-
-
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 def sanitize_input(text):
@@ -217,7 +123,7 @@ def start(message):
     }
     bot.send_message(chat_id, "Привет! Выберите магазин для переводов:", reply_markup=get_shop_menu())
 
-# Выбор магазина — устанавливаем stage wait_for_employee
+# === ВЫБОР МАГАЗИНА ===
 @bot.message_handler(func=lambda m: m.text in ["Янтарь", "Хайп", "Полка"])
 def choose_shop(message):
     chat_id = message.chat.id
@@ -230,8 +136,7 @@ def choose_shop(message):
             "mode": "add",
             "cash": 0,
             "terminal": 0,
-            "stage": "wait_for_employee",  # Переходим к выбору сотрудника
-            "employee": None,
+            "stage": "main",
             "date": datetime.now().strftime("%d.%m.%Y"),
             "order_shop": None,
             "order_items": [],
@@ -240,28 +145,8 @@ def choose_shop(message):
             "pending_delivery": [],
             "accepted_delivery": []
         })
-        ask_for_employee(chat_id)  # Просим выбрать сотрудника
+        bot.send_message(chat_id, f"Выбран магазин: <b>{message.text}</b>", reply_markup=get_main_menu())
         return
-
-    # Здесь остальной код выбора магазинов для заказа и приемки...
-
-# Обработчик выбора сотрудника
-@bot.message_handler(func=lambda message: user_data.get(message.chat.id, {}).get("stage") == "wait_for_employee")
-def handle_employee_selection(message):
-    chat_id = message.chat.id
-    selected_employee = message.text.strip()
-    if selected_employee not in employees:
-        bot.send_message(chat_id, "❌ Такого сотрудника нет в списке. Попробуйте снова.")
-        ask_for_employee(chat_id)  # Предлагаем выбрать снова
-        return
-    user_data[chat_id]["employee"] = selected_employee
-    user_data[chat_id]["stage"] = "main"  # Переходим в главное меню
-    bot.send_message(chat_id, f"✅ Выбран сотрудник: {selected_employee}", reply_markup=get_main_menu())
-
-
-    # Дальнейшая логика выбора магазина для заказов и приемок и т.п.
-    # (оставьте по необходимости)
-
 
     # === ОБРАБОТКА ВЫБОРА МАГАЗИНА ДЛЯ ЗАКАЗОВ ===
     if user.get("stage") == "choose_shop_order":
@@ -522,12 +407,6 @@ def handle_any_message(message):
             bot.send_message(chat_id, "Отмена подтверждения отчёта.", reply_markup=get_main_menu())
             return
 
-    # === я хз вьебу его сюда ===
-    
-@bot.message_handler(func=lambda m: m.text == "📤 Отправить отчёт")
-def handle_send_report(message):
-    send_report(message.chat.id)
-
     # === ВВОД КАСТОМНОЙ ДАТЫ ===
     if user.get("stage") == "custom_date_input":
         try:
@@ -587,28 +466,16 @@ def send_report(chat_id):
     date = data["date"]
 
     report_text = (
-    f"📦 Магазин: {shop}\n"
-    f"👤 Сотрудник: {employee}\n"
-    f"📅 Дата: {date}\n"
-    f"💳 Переводы: {transfers}₽\n"
-    f"💵 Наличные: {cash}₽\n"
-    f"🏧 Терминал: {terminal}₽\n"
-    f"📊 Итого: {transfers + cash + terminal}₽"
-)
+        f"📦 Магазин: {shop}\n"
+        f"📅 Дата: {date}\n"
+        f"💳 Переводы: {transfers}₽\n"
+        f"💵 Наличные: {cash}₽\n"
+        f"🏧 Терминал: {terminal}₽\n"
+        f"📊 Итого: {transfers + cash + terminal}₽"
+    )
 
-    try:
-        sheet.append_row([date, shop, employee, transfers, cash, terminal])
-    except Exception as e:
-        print(f"Ошибка записи в таблицу: {e}")
-        bot.send_message(chat_id, "❌ Ошибка при записи в таблицу.")
-        return
-
+    sheet.append_row([date, shop, transfers, cash, terminal])
     bot.send_message(CHAT_ID_FOR_REPORT, report_text, message_thread_id=THREAD_ID_FOR_REPORT)
-
-    # Сброс состояния и возврат главного меню
-    user_data[chat_id]["stage"] = "main"
-    bot.send_message(chat_id, "✅ Отчёт отправлен!", reply_markup=get_main_menu())
-
 
 # === ОТПРАВКА ЗАКАЗА В ТЕЛЕГРАМ ===
 def send_order(chat_id):
