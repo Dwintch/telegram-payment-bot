@@ -581,16 +581,17 @@ def send_report(chat_id):
     date = data["date"]
 
     report_text = (
-        f"📦 Магазин: {shop}\n"
-        f"📅 Дата: {date}\n"
-        f"💳 Переводы: {transfers}₽\n"
-        f"💵 Наличные: {cash}₽\n"
-        f"🏧 Терминал: {terminal}₽\n"
-        f"📊 Итого: {transfers + cash + terminal}₽"
-    )
+    f"📦 Магазин: {shop}\n"
+    f"👤 Сотрудник: {employee}\n"
+    f"📅 Дата: {date}\n"
+    f"💳 Переводы: {transfers}₽\n"
+    f"💵 Наличные: {cash}₽\n"
+    f"🏧 Терминал: {terminal}₽\n"
+    f"📊 Итого: {transfers + cash + terminal}₽"
+)
 
     try:
-        sheet.append_row([date, shop, transfers, cash, terminal])
+        sheet.append_row([date, shop, employee, transfers, cash, terminal])
     except Exception as e:
         print(f"Ошибка записи в таблицу: {e}")
         bot.send_message(chat_id, "❌ Ошибка при записи в таблицу.")
