@@ -212,25 +212,28 @@ def choose_shop(message):
     chat_id = message.chat.id
     user = user_data.get(chat_id)
     if not user or user.get("stage") == "choose_shop":
-    user_data[chat_id] = user or {}
-    user_data[chat_id].update({
-        "shop": message.text,
-        "transfers": [],
-        "mode": "add",
-        "cash": 0,
-        "terminal": 0,
-        "stage": "wait_for_employee",  # <-- меняем с "main" на "wait_for_employee"
-        "employee": None,               # <-- добавляем поле для выбранного сотрудника
-        "date": datetime.now().strftime("%d.%m.%Y"),
-        "order_shop": None,
-        "order_items": [],
-        "order_photos": [],
-        "order_date": None,
-        "pending_delivery": [],
-        "accepted_delivery": []
-    })
-    ask_for_employee(chat_id)  # вызываем выбор сотрудника после выбора магазина
-    return
+        user_data[chat_id] = user or {}
+        user_data[chat_id].update({
+            "shop": message.text,
+            "transfers": [],
+            "mode": "add",
+            "cash": 0,
+            "terminal": 0,
+            "stage": "wait_for_employee",  # <-- меняем с "main" на "wait_for_employee"
+            "employee": None,              # <-- добавляем поле для выбранного сотрудника
+            "date": datetime.now().strftime("%d.%m.%Y"),
+            "order_shop": None,
+            "order_items": [],
+            "order_photos": [],
+            "order_date": None,
+            "pending_delivery": [],
+            "accepted_delivery": []
+        })
+        ask_for_employee(chat_id)  # вызываем выбор сотрудника после выбора магазина
+        return
+
+    # Дальнейшая логика выбора магазина для заказов и приемок и т.п.
+    # (оставьте по необходимости)
 
 
     # === ОБРАБОТКА ВЫБОРА МАГАЗИНА ДЛЯ ЗАКАЗОВ ===
