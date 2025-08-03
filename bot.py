@@ -23,7 +23,7 @@ GOOGLE_SHEET_NAME = 'Отчёты'
 CREDENTIALS_FILE = 'credentials.json'
 
 # API ключ для погоды (OpenWeatherMap)
-WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
+WEATHER_API_KEY = os.getenv("0657e04209d46b14a466de79282d9ca7")
 WEATHER_CITY = "Gelendzhik"
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')
