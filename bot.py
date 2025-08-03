@@ -483,7 +483,7 @@ def handle_any_message(message):
             user["terminal"] = 0
             user["employees"] = []
             user["employee_selection_count"] = 0
-            user["stage"] = "main"
+            user["stage"] = "choose_shop"
             bot.send_message(chat_id, "✅ Отчёт отправлен! Выберите магазин для переводов:", reply_markup=get_shop_menu())
             return
         elif text == "✏️ Изменить данные":
