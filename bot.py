@@ -451,7 +451,7 @@ def handle_any_message(message):
         return
 
     # === ЧИСЛОВОЙ ВВОД ===
-    if text.isdigit():
+if text.isdigit():
     amount = int(text)
     stage = user.get("stage", "main")
 
@@ -475,7 +475,6 @@ def handle_any_message(message):
         user["stage"] = "choose_employee"  # Меняем стадию на выбор сотрудника
         ask_for_employees(chat_id)
         return
-
 
     # === ОБРАБОТКА ПОДТВЕРЖДЕНИЯ ОТЧЕТА ===
     if user.get("stage") == "confirm_report":
