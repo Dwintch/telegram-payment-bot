@@ -470,11 +470,12 @@ def handle_any_message(message):
             bot.send_message(chat_id, "Сколько по терминалу:")
             return
 
-        elif stage == "terminal_input":
-            user["terminal"] = amount
-            user["stage"] = "choose_employee"  # Меняем стадию на выбор сотрудника
-              ask_for_employees(chat_id)
-            return
+       elif stage == "terminal_input":
+    user["terminal"] = amount
+    user["stage"] = "choose_employee"  # Меняем стадию на выбор сотрудника
+    ask_for_employees(chat_id)
+    return
+
     
 
     # === ОБРАБОТКА ПОДТВЕРЖДЕНИЯ ОТЧЕТА ===
