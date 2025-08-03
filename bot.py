@@ -28,6 +28,9 @@ OPENWEATHER_CITY = "Moscow"  # Можно поменять на нужный г�
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')
 user_data = {}
 
+# === СПИСОК СОТРУДНИКОВ ===
+STAFF_LIST = ["Данил", "Даниз", "Даша", "Соня", "Оксана", "Лиза"]
+
 # === GOOGLE SHEETS ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
@@ -74,6 +77,20 @@ def get_order_action_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("✅ Отправить заказ", "✏️ Изменить заказ")
     markup.add("💾 Сохранить заказ (не отправлять)", "❌ Отмена")
+    return markup
+
+# === КНОПКИ ДЛЯ СОТРУДНИКОВ (INLINE) ===
+def get_staff_keyboard(selected_staff=None):
+    selected_staff = selected_staff or []
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    for staff in STAFF_LIST:
+        text = f"✅ {staff}" if staff in selected_staff else staff
+        callback_data = f"staff_{staff}"
+        buttons.append(types.InlineKeyboardButton(text, callback_data=callback_data))
+    # Кнопка для завершения выбора
+    markup.add(*buttons)
+    markup.add(types.InlineKeyboardButton("Далее", callback_data="staff_done"))
     return markup
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
@@ -141,7 +158,8 @@ def start(message):
         "pending_delivery": [],
         "accepted_delivery": [],
         "last_order": [],
-        "saved_order": []
+        "saved_order": [],
+        "selected_staff": []
     }
     bot.send_message(chat_id, "Привет! Выберите магазин для переводов:", reply_markup=get_shop_menu())
 
@@ -165,7 +183,8 @@ def choose_shop(message):
             "order_photos": [],
             "order_date": None,
             "pending_delivery": [],
-            "accepted_delivery": []
+            "accepted_delivery": [],
+            "selected_staff": []
         })
         bot.send_message(chat_id, f"Выбран магазин: <b>{message.text}</b>", reply_markup=get_main_menu())
         return
@@ -207,6 +226,34 @@ def choose_shop(message):
             return
 
     bot.send_message(chat_id, "Пожалуйста, выберите магазин из меню.", reply_markup=get_shop_menu())
+
+# === ОБРАБОТКА CALLBACK ДЛЯ ВЫБОРА СОТРУДНИКОВ ===
+@bot.callback_query_handler(func=lambda call: call.data.startswith('staff_'))
+def handle_staff_callback(call):
+    chat_id = call.message.chat.id
+    user = user_data.get(chat_id)
+    if not user or user.get('stage') != 'choose_staff':
+        bot.answer_callback_query(call.id)
+        return
+
+    staff_name = call.data.replace('staff_', '')
+    if staff_name == 'done':
+        # переход к подтверждению отчета
+        user['stage'] = 'confirm_report'
+        preview_report(chat_id)
+        bot.answer_callback_query(call.id)
+        return
+
+    selected = user.setdefault('selected_staff', [])
+    # Переключаем выбор
+    if staff_name in selected:
+        selected.remove(staff_name)
+    else:
+        selected.append(staff_name)
+
+    # Обновляем клавиатуру
+    bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=get_staff_keyboard(selected))
+    bot.answer_callback_query(call.id)
 
 # === ОБРАБОТКА ТЕКСТА ===
 @bot.message_handler(func=lambda m: True)
@@ -402,8 +449,10 @@ def handle_any_message(message):
 
         elif stage == "terminal_input":
             user["terminal"] = amount
-            user["stage"] = "confirm_report"
-            preview_report(chat_id)
+            # ВМЕСТО ПРЕДПРОСМОТРА ОТЧЁТА — ВЫБОР СОТРУДНИКОВ!
+            user["stage"] = "choose_staff"
+            user["selected_staff"] = []
+            bot.send_message(chat_id, "Выберите сотрудников, которые были на смене:", reply_markup=get_staff_keyboard())
             return
 
     # === ОБРАБОТКА ПОДТВЕРЖДЕНИЯ ОТЧЕТА ===
@@ -413,6 +462,7 @@ def handle_any_message(message):
             user["transfers"] = []
             user["cash"] = 0
             user["terminal"] = 0
+            user["selected_staff"] = []
             user["stage"] = "main"
             bot.send_message(chat_id, "✅ Отчёт отправлен! Выберите магазин для переводов:", reply_markup=get_shop_menu())
             return
@@ -453,6 +503,7 @@ def preview_report(chat_id):
     terminal = data["terminal"]
     total = transfers + cash + terminal
     date = data["date"]
+    staff = data.get("selected_staff", [])
 
     if shop == "Янтарь":
         if total < 40000:
@@ -466,6 +517,8 @@ def preview_report(chat_id):
         salary = max(2000, round_to_50(total * 0.10))
         salary_text = f"👔 ЗП: {salary}₽"
 
+    staff_text = "👥 Сотрудники: " + (', '.join(staff) if staff else "не выбраны")
+
     report_text = (
         f"📦 Магазин: {shop}\n"
         f"📅 Дата: {date}\n"
@@ -473,7 +526,8 @@ def preview_report(chat_id):
         f"💵 Наличные: {cash}₽\n"
         f"🏧 Терминал: {terminal}₽\n"
         f"📊 Итого: {total}₽\n"
-        f"{salary_text}"
+        f"{salary_text}\n"
+        f"{staff_text}"
     )
 
     bot.send_message(chat_id, report_text, reply_markup=get_confirm_menu())
@@ -486,7 +540,7 @@ def send_report(chat_id):
     cash = data["cash"]
     terminal = data["terminal"]
     date = data["date"]
-
+    staff = ', '.join(data.get("selected_staff", []))
     weather = get_weather()  # Получаем погоду!
 
     report_text = (
@@ -496,11 +550,12 @@ def send_report(chat_id):
         f"💵 Наличные: {cash}₽\n"
         f"🏧 Терминал: {terminal}₽\n"
         f"📊 Итого: {transfers + cash + terminal}₽\n"
+        f"👥 Сотрудники: {staff if staff else 'не выбраны'}\n"
         f"🌦️ Погода: {weather}"
     )
 
-    # Таблица: добавляем новую колонку "Погода"
-    sheet.append_row([date, shop, transfers, cash, terminal, weather])
+    # Таблица: добавляем новую колонку "Сотрудники" и "Погода"
+    sheet.append_row([date, shop, transfers, cash, terminal, staff, weather])
     bot.send_message(CHAT_ID_FOR_REPORT, report_text, message_thread_id=THREAD_ID_FOR_REPORT)
 
 # === ОТПРАВКА ЗАКАЗА В ТЕЛЕГРАМ ===
