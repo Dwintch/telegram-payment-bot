@@ -47,6 +47,11 @@ def get_main_menu():
     markup.add("❌ Отменить")
     return markup
 
+def get_yes_no_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add("✅ Да", "❌ Нет")
+    return markup
+
 def get_shop_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("Янтарь", "Хайп", "Полка")
