@@ -3,6 +3,7 @@ import json
 import logging
 from datetime import datetime
 
+import requests
 import telebot
 from telebot import types
 from dotenv import load_dotenv
@@ -19,6 +20,10 @@ THREAD_ID_FOR_REPORT = 3
 THREAD_ID_FOR_ORDER = 64
 GOOGLE_SHEET_NAME = 'Отчёты'
 CREDENTIALS_FILE = 'credentials.json'
+
+# Ключ API погоды OpenWeatherMap
+WEATHER_API_KEY = "0657e04209d46b14a466de79282d9ca7"
+CITY = "Gelendzhik"
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')
 user_data = {}
@@ -57,7 +62,6 @@ def get_order_action_menu():
     markup.add("💾 Сохранить заказ (не отправлять)", "❌ Отмена")
     return markup
 
-# === МЕНЮ ВЫБОРА ПЕРСОНАЛА ===
 def get_employee_selection_menu(selected=None):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     selected = selected or []
@@ -73,46 +77,25 @@ def ask_for_employees(chat_id):
     user["stage"] = "choose_employee"
     bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu())
 
-@bot.message_handler(func=lambda m: user_data.get(m.chat.id, {}).get("stage") == "choose_employee")
-def handle_employee_selection(message):
-    chat_id = message.chat.id
-    user = user_data[chat_id]
-    text = message.text
-
-    if text == "Готово":
-        shop = user["shop"]
-        selected = user.get("selected_employees", [])
-
-        if shop == "Янтарь" and len(selected) != 2:
-            bot.send_message(chat_id, "Для магазина Янтарь нужно выбрать ровно двух сотрудников. Выберите ещё.")
-            bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu(selected))
-            return
-        elif shop in ["Хайп", "Полка"] and len(selected) != 1:
-            bot.send_message(chat_id, "Для магазина Хайп и Полка нужно выбрать ровно одного сотрудника. Выберите ещё.")
-            bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu(selected))
-            return
-
-        user["employees"] = selected
-        user["stage"] = "confirm_report"
-        preview_report(chat_id)
-        return
-
-    elif text == "❌ Отмена":
-        user["stage"] = "main"
-        bot.send_message(chat_id, "Отмена выбора сотрудников.", reply_markup=get_main_menu())
-        return
-
-    if text in EMPLOYEES:
-        selected = user.get("selected_employees", [])
-        if text in selected:
-            selected.remove(text)
-        else:
-            selected.append(text)
-        user["selected_employees"] = selected
-        bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu(selected))
-        return
-
-    bot.send_message(chat_id, "Пожалуйста, выберите сотрудника из списка или нажмите 'Готово'.")
+# === ПОЛУЧЕНИЕ ПОГОДЫ ===
+def get_weather():
+    try:
+        url = (f"http://api.openweathermap.org/data/2.5/weather?"
+               f"q={CITY}&appid={WEATHER_API_KEY}&units=metric&lang=ru")
+        response = requests.get(url)
+        data = response.json()
+        if data.get("cod") != 200:
+            return None
+        weather_info = {
+            "temp": data["main"]["temp"],
+            "humidity": data["main"]["humidity"],
+            "description": data["weather"][0]["description"],
+            "wind_speed": data["wind"]["speed"]
+        }
+        return weather_info
+    except Exception as e:
+        logging.error(f"Ошибка при получении погоды: {e}")
+        return None
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 def sanitize_input(text):
@@ -449,108 +432,176 @@ def handle_any_message(message):
             bot.send_message(chat_id, "⚠️ Введите корректное число терминала.")
             return
 
-        # После ввода наличных и терминала - перейти к выбору сотрудников
-        ask_for_employees(chat_id)
+        # Дальше выбираем сотрудников
+        user["stage"] = "choose_employee"
+        user["selected_employees"] = []
+        bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu())
         return
 
-    if user.get("stage") == "confirm_report":
-        if text == "✅ Отправить":
-            send_report(chat_id)
+    if user["stage"] == "choose_employee":
+        if text == "Готово":
+            if not user.get("selected_employees"):
+                bot.send_message(chat_id, "⚠️ Выберите хотя бы одного сотрудника.")
+                return
+            user["stage"] = "confirm_report"
+            # Показываем отчет
+            total_transfers = sum(user["transfers"])
+            cash = user["cash"]
+            terminal = user["terminal"]
+            shop = user["shop"]
+            employees_str = ", ".join(user["selected_employees"])
+            date = user["date"]
+
+            weather = get_weather()
+            weather_str = "Погода не получена"
+            if weather:
+                weather_str = (f"{weather['description'].capitalize()}, "
+                               f"{weather['temp']}°C, влажность {weather['humidity']}%, "
+                               f"ветер {weather['wind_speed']} м/с")
+
+            report_text = (
+                f"🧾 Отчёт по смене\n"
+                f"Магазин: <b>{shop}</b>\n"
+                f"Дата: <b>{date}</b>\n"
+                f"Переводы: <b>{total_transfers}₽</b>\n"
+                f"Наличные: <b>{cash}₽</b>\n"
+                f"Терминал: <b>{terminal}₽</b>\n"
+                f"Сотрудники: <b>{employees_str}</b>\n"
+                f"Погода: <i>{weather_str}</i>\n\n"
+                f"Подтвердите отправку отчёта."
+            )
+
+            user["report_text"] = report_text
+            user["weather_data"] = weather
+            bot.send_message(chat_id, report_text, reply_markup=get_confirm_menu())
+            return
+
+        if text == "❌ Отмена":
             user["stage"] = "main"
-            bot.send_message(chat_id, "Отчёт отправлен!", reply_markup=get_main_menu())
-        elif text == "✏️ Изменить данные":
+            bot.send_message(chat_id, "❌ Отмена выбора сотрудников.", reply_markup=get_main_menu())
+            return
+
+        if text in EMPLOYEES:
+            selected = user.get("selected_employees", [])
+            if text in selected:
+                selected.remove(text)
+            else:
+                # Проверка на количество выбранных сотрудников в зависимости от магазина
+                if user["shop"] == "Янтарь" and len(selected) >= 2:
+                    bot.send_message(chat_id, "⚠️ Для Янтаря можно выбрать максимум 2 сотрудников.")
+                    return
+                elif user["shop"] in ["Хайп", "Полка"] and len(selected) >= 1:
+                    bot.send_message(chat_id, "⚠️ Для Хайпа и Полки можно выбрать только 1 сотрудника.")
+                    return
+                selected.append(text)
+            user["selected_employees"] = selected
+            bot.send_message(chat_id, "Выберите сотрудников:", reply_markup=get_employee_selection_menu(selected))
+            return
+
+        bot.send_message(chat_id, "⚠️ Пожалуйста, выбирайте сотрудников из списка.", reply_markup=get_employee_selection_menu(user.get("selected_employees", [])))
+        return
+
+    if user["stage"] == "confirm_report":
+        if text == "✅ Отправить":
+            # Запись в Google Sheets
+            try:
+                total_transfers = sum(user["transfers"])
+                cash = user["cash"]
+                terminal = user["terminal"]
+                shop = user["shop"]
+                employees = ", ".join(user["selected_employees"])
+                date = user["date"]
+                weather = user.get("weather_data", {})
+
+                sheet.append_row([
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    date,
+                    shop,
+                    total_transfers,
+                    cash,
+                    terminal,
+                    employees,
+                    weather.get("temp", ""),
+                    weather.get("humidity", ""),
+                    weather.get("description", ""),
+                    weather.get("wind_speed", "")
+                ])
+
+                # Отправка отчёта в Telegram топик
+                bot.send_message(
+                    CHAT_ID_FOR_REPORT,
+                    user["report_text"],
+                    disable_web_page_preview=True
+                )
+
+                # Сброс данных
+                user.update({
+                    "transfers": [],
+                    "cash": 0,
+                    "terminal": 0,
+                    "selected_employees": [],
+                    "stage": "main",
+                })
+            except Exception as e:
+                logging.error(f"Ошибка при записи отчёта: {e}")
+                bot.send_message(chat_id, "⚠️ Ошибка при записи отчёта. Попробуйте позже.")
+                return
+            bot.send_message(chat_id, "✅ Отчёт отправлен!", reply_markup=get_main_menu())
+            return
+
+        if text == "✏️ Изменить данные":
             user["stage"] = "cash_input"
             bot.send_message(chat_id, "Введите сумму наличных:")
-        elif text == "🗓 Изменить дату":
-            bot.send_message(chat_id, "Введите дату в формате ДД.ММ.ГГГГ:")
+            return
+
+        if text == "🗓 Изменить дату":
+            bot.send_message(chat_id, "Введите дату в формате ДД.ММ.ГГГГ (например, 31.07.2025):")
             user["stage"] = "date_input"
-        elif text == "❌ Отмена":
+            return
+
+        if text == "❌ Отмена":
             user["stage"] = "main"
-            bot.send_message(chat_id, "Отмена отчёта.", reply_markup=get_main_menu())
-        else:
-            bot.send_message(chat_id, "Пожалуйста, выберите действие из меню.", reply_markup=get_confirm_menu())
-        return
+            bot.send_message(chat_id, "❌ Отмена отправки отчёта.", reply_markup=get_main_menu())
+            return
 
-    if user.get("stage") == "date_input":
+    if user["stage"] == "date_input":
         try:
-            datetime.strptime(text, "%d.%m.%Y")
-            user["date"] = text
-            bot.send_message(chat_id, f"Дата изменена на {text}")
+            dt = datetime.strptime(text, "%d.%m.%Y")
+            user["date"] = dt.strftime("%d.%m.%Y")
+            bot.send_message(chat_id, f"Дата изменена на {user['date']}")
             user["stage"] = "confirm_report"
-            preview_report(chat_id)
+            bot.send_message(chat_id, user.get("report_text", "Перейдите к подтверждению отчёта."), reply_markup=get_confirm_menu())
         except:
-            bot.send_message(chat_id, "⚠️ Неверный формат даты. Введите дату ДД.ММ.ГГГГ:")
+            bot.send_message(chat_id, "⚠️ Неверный формат даты. Попробуйте ещё раз (ДД.ММ.ГГГГ).")
         return
 
-    bot.send_message(chat_id, "⚠️ Неизвестная команда или действие. Выберите из меню.", reply_markup=get_main_menu())
+    # Если ни одно условие не сработало
+    bot.send_message(chat_id, "⚠️ Неизвестная команда или состояние. Попробуйте /start.")
 
-# === ФУНКЦИИ ОТПРАВКИ ===
-def preview_report(chat_id):
-    user = user_data[chat_id]
-    transfers_sum = sum(user["transfers"])
-    cash = user.get("cash", 0)
-    terminal = user.get("terminal", 0)
-    date = user.get("date", datetime.now().strftime("%d.%m.%Y"))
-    shop = user.get("shop", "Не выбран")
-    employees = user.get("employees", [])
-    employees_str = ", ".join(employees) if employees else "Не выбран"
-
-    report_text = (
-        f"📦 Магазин: {shop}\n"
-        f"📅 Дата: {date}\n"
-        f"💳 Переводы: {transfers_sum}₽\n"
-        f"💵 Наличные: {cash}₽\n"
-        f"🏧 Терминал: {terminal}₽\n"
-        f"👥 Сотрудники: {employees_str}\n"
-        f"📊 Итого: {transfers_sum + cash + terminal}₽"
-    )
-    bot.send_message(chat_id, report_text, reply_markup=get_confirm_menu())
-
-def send_report(chat_id):
-    user = user_data[chat_id]
-    transfers_sum = sum(user["transfers"])
-    cash = user.get("cash", 0)
-    terminal = user.get("terminal", 0)
-    date = user.get("date", datetime.now().strftime("%d.%m.%Y"))
-    shop = user.get("shop", "Не выбран")
-    employees = user.get("employees", [])
-    employees_str = ", ".join(employees) if employees else "Не выбран"
-
-    report_text = (
-        f"📦 Магазин: {shop}\n"
-        f"📅 Дата: {date}\n"
-        f"💳 Переводы: {transfers_sum}₽\n"
-        f"💵 Наличные: {cash}₽\n"
-        f"🏧 Терминал: {terminal}₽\n"
-        f"👥 Сотрудники: {employees_str}\n"
-        f"📊 Итого: {transfers_sum + cash + terminal}₽"
-    )
-
-    # Отправляем сообщение в топик отчетов
-    bot.send_message(CHAT_ID_FOR_REPORT, report_text, message_thread_id=THREAD_ID_FOR_REPORT)
-
-    # Записываем в Google Sheets: дата, магазин, переводы, наличные, терминал, сотрудники
-    sheet.append_row([date, shop, transfers_sum, cash, terminal, employees_str])
-
-# === ОТПРАВКА ЗАКАЗА ===
+# === ОТПРАВКА ЗАКАЗА В ТОПИК ===
 def send_order(chat_id):
-    user = user_data[chat_id]
-    shop = user.get("order_shop", "Не выбран")
-    items = user.get("order_items", [])
-    photos = user.get("order_photos", [])
-
-    if not items:
-        bot.send_message(chat_id, "⚠️ Заказ пустой, нечего отправлять.")
+    user = user_data.get(chat_id)
+    if not user or not user.get("order_items"):
+        bot.send_message(chat_id, "⚠️ Нет товаров для заказа.")
         return
 
-    order_text = f"🛍 Заказ для магазина <b>{shop}</b>:\n" + "\n".join(f"• {item}" for item in items)
-    bot.send_message(CHAT_ID_FOR_REPORT, order_text, message_thread_id=THREAD_ID_FOR_ORDER)
+    order_shop = user.get("order_shop")
+    order_text = format_order_list(user["order_items"])
 
-    # Отправляем фото в топик заказа (если есть)
-    for photo in photos:
-        bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=photo.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
+    # Отправляем заказ в топик с ID THREAD_ID_FOR_ORDER
+    try:
+        bot.send_message(
+            CHAT_ID_FOR_REPORT,
+            f"🛍 Новый заказ в магазине <b>{order_shop}</b>:\n\n{order_text}",
+            reply_markup=None
+        )
+    except Exception as e:
+        logging.error(f"Ошибка при отправке заказа: {e}")
+        bot.send_message(chat_id, "⚠️ Ошибка при отправке заказа.")
 
-# === ЗАПУСК БОТА ===
+# === ЛОГИ ===
+logging.basicConfig(level=logging.INFO)
+
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    print("Бот запущен...")
     bot.infinity_polling()
