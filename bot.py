@@ -8,6 +8,7 @@ from telebot import types
 from dotenv import load_dotenv
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import requests  # Для работы с OpenWeather
 
 # === ЗАГРУЗКА .ENV ===
 load_dotenv()
@@ -20,6 +21,10 @@ THREAD_ID_FOR_ORDER = 64
 GOOGLE_SHEET_NAME = 'Отчёты'
 CREDENTIALS_FILE = 'credentials.json'
 
+# === НАСТРОЙКИ ПОГОДЫ ===
+OPENWEATHER_API_KEY = "0657e04209d46b14a466de79282d9ca7"
+OPENWEATHER_CITY = "Moscow"  # Можно поменять на нужный город
+
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')
 user_data = {}
 
@@ -28,6 +33,23 @@ scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/au
 creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
 client = gspread.authorize(creds)
 sheet = client.open(GOOGLE_SHEET_NAME).sheet1
+
+# === ФУНКЦИЯ ПОЛУЧЕНИЯ ПОГОДЫ ===
+def get_weather():
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={OPENWEATHER_CITY}&appid={OPENWEATHER_API_KEY}&units=metric&lang=ru"
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            temp = data["main"]["temp"]
+            desc = data["weather"][0]["description"]
+            return f"{temp}°C, {desc}"
+        else:
+            logging.warning(f"OpenWeather error: {response.status_code}")
+            return "нет данных"
+    except Exception as e:
+        logging.error(f"Ошибка получения погоды: {e}")
+        return "нет данных"
 
 # === КНОПКИ ===
 def get_main_menu():
@@ -156,7 +178,7 @@ def choose_shop(message):
             user["order_items"] = []
             user["order_photos"] = []
             user["stage"] = "order_input"
-            bot.send_message(chat_id, f"Выбран магазин для заказа: <b>{message.text}</b>\nВведите товары через запятую или с новой строки:", reply_markup=None)
+            bot.send_message(chat_id, f"Выбран магазин для заказа: <b>{message.text}</b>\nВведите товары через запятую или с новой строки:")
             return
 
     # === ОБРАБОТКА ВЫБОРА МАГАЗИНА ДЛЯ ПРИЁМКИ ===
@@ -465,16 +487,20 @@ def send_report(chat_id):
     terminal = data["terminal"]
     date = data["date"]
 
+    weather = get_weather()  # Получаем погоду!
+
     report_text = (
         f"📦 Магазин: {shop}\n"
         f"📅 Дата: {date}\n"
         f"💳 Переводы: {transfers}₽\n"
         f"💵 Наличные: {cash}₽\n"
         f"🏧 Терминал: {terminal}₽\n"
-        f"📊 Итого: {transfers + cash + terminal}₽"
+        f"📊 Итого: {transfers + cash + terminal}₽\n"
+        f"🌦️ Погода: {weather}"
     )
 
-    sheet.append_row([date, shop, transfers, cash, terminal])
+    # Таблица: добавляем новую колонку "Погода"
+    sheet.append_row([date, shop, transfers, cash, terminal, weather])
     bot.send_message(CHAT_ID_FOR_REPORT, report_text, message_thread_id=THREAD_ID_FOR_REPORT)
 
 # === ОТПРАВКА ЗАКАЗА В ТЕЛЕГРАМ ===
