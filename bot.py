@@ -452,8 +452,8 @@ def handle_any_message(message):
 
     # === ЧИСЛОВОЙ ВВОД ===
     if text.isdigit():
-    amount = int(text)
-    stage = user.get("stage", "main")
+        amount = int(text)
+        stage = user.get("stage", "main")
 
     if stage == "amount_input":
         user["transfers"].append(-amount if user["mode"] == "subtract" else amount)
