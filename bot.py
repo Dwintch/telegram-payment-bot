@@ -314,7 +314,7 @@ def handle_any_message(message):
                 user["order_shop"] = None
                 user["order_photos"] = []
                 user["stage"] = "main"
-                bot.send_message(chat_id, "💾 Заказ сохранён. Чтобы отправить — зайдите в заказ и нажмите «✅ Отправить заказ».", reply_markup=get_main_menu())
+                bot.send_message(chat_id, "💾 Заказ сохранён. Чтобы отправить — зайдите в заказ и нажмите «✅ Отправить заказ»", reply_markup=get_main_menu())
                 return
 
             if text == "❌ Отмена":
@@ -371,7 +371,7 @@ def handle_any_message(message):
 
         invalid_items = [item for item in arrived if item not in user.get("pending_delivery", [])]
         if invalid_items:
-            bot.send_message(chat_id, f"⚠️ Товар(ы) не найден(ы) в списке ожидаемых: {', '.join(invalid_items)}.\nПожалуйста, введите точно как в списке.")
+            bot.send_message(chat_id, f"⚠️ Товар(ы) не найден(ы) в списке ожидаемых: {', '.join(invalid_items)}.\nПожалуйста, введите точные названия.")
             return
 
         not_arrived = [item for item in user.get("pending_delivery", []) if item not in arrived]
@@ -463,7 +463,7 @@ def handle_any_message(message):
             user["cash"] = 0
             user["terminal"] = 0
             user["selected_staff"] = []
-            user["stage"] = "main"
+            user["stage"] = "choose_shop"  # <--- Исправление бага!
             bot.send_message(chat_id, "✅ Отчёт отправлен! Выберите магазин для переводов:", reply_markup=get_shop_menu())
             return
         elif text == "✏️ Изменить данные":
