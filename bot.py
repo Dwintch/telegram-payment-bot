@@ -464,17 +464,18 @@ def handle_any_message(message):
             user["stage"] = "main"
             return
 
-        elif stage == "cash_input":
+                elif stage == "cash_input":
             user["cash"] = amount
             user["stage"] = "terminal_input"
             bot.send_message(chat_id, "Сколько по терминалу:")
             return
 
-       elif stage == "terminal_input":
-    user["terminal"] = amount
-    user["stage"] = "choose_employee"  # Меняем стадию на выбор сотрудника
-    ask_for_employees(chat_id)
-    return
+        elif stage == "terminal_input":
+            user["terminal"] = amount
+            user["stage"] = "choose_employee"  # Меняем стадию на выбор сотрудника
+            ask_for_employees(chat_id)
+            return
+
 
     
 
