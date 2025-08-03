@@ -57,6 +57,7 @@ def get_order_action_menu():
     markup.add("💾 Сохранить заказ (не отправлять)", "❌ Отмена")
     return markup
 
+# === МЕНЮ ВЫБОРА ПЕРСОНАЛА ===
 def get_employee_selection_menu(selected=None):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     selected = selected or []
@@ -69,6 +70,7 @@ def get_employee_selection_menu(selected=None):
 def ask_for_employees(chat_id):
     user = user_data[chat_id]
     user["selected_employees"] = []
+    user["stage"] = "choose_employee"
     bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu())
 
 @bot.message_handler(func=lambda m: user_data.get(m.chat.id, {}).get("stage") == "choose_employee")
@@ -80,6 +82,7 @@ def handle_employee_selection(message):
     if text == "Готово":
         shop = user["shop"]
         selected = user.get("selected_employees", [])
+
         if shop == "Янтарь" and len(selected) != 2:
             bot.send_message(chat_id, "Для магазина Янтарь нужно выбрать ровно двух сотрудников. Выберите ещё.")
             bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu(selected))
@@ -88,6 +91,7 @@ def handle_employee_selection(message):
             bot.send_message(chat_id, "Для магазина Хайп и Полка нужно выбрать ровно одного сотрудника. Выберите ещё.")
             bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu(selected))
             return
+
         user["employees"] = selected
         user["stage"] = "confirm_report"
         preview_report(chat_id)
@@ -177,6 +181,7 @@ def start(message):
         "saved_order": []
     }
     bot.send_message(chat_id, "Привет! Выберите магазин для переводов:", reply_markup=get_shop_menu())
+
 # === ВЫБОР МАГАЗИНА ===
 @bot.message_handler(func=lambda m: m.text in ["Янтарь", "Хайп", "Полка"])
 def choose_shop(message):
@@ -202,7 +207,6 @@ def choose_shop(message):
         bot.send_message(chat_id, f"Выбран магазин: <b>{message.text}</b>", reply_markup=get_main_menu())
         return
 
-    # === ОБРАБОТКА ВЫБОРА МАГАЗИНА ДЛЯ ЗАКАЗОВ ===
     if user.get("stage") == "choose_shop_order":
         allowed_shops = ["Янтарь", "Хайп", "Полка"]
         if message.text in allowed_shops:
@@ -213,7 +217,6 @@ def choose_shop(message):
             bot.send_message(chat_id, f"Выбран магазин для заказа: <b>{message.text}</b>\nВведите товары через запятую или с новой строки:", reply_markup=None)
             return
 
-    # === ОБРАБОТКА ВЫБОРА МАГАЗИНА ДЛЯ ПРИЁМКИ ===
     if user.get("stage") == "choose_shop_delivery":
         allowed_shops = ["Янтарь", "Хайп", "Полка"]
         if message.text in allowed_shops:
@@ -223,9 +226,11 @@ def choose_shop(message):
                 if u.get("order_shop") == message.text and u.get("last_order"):
                     pending.extend(u["last_order"])
             pending = list(set(pending))
+
             if "accepted_delivery" not in user:
                 user["accepted_delivery"] = []
             user["pending_delivery"] = [item for item in pending if item not in user["accepted_delivery"]]
+
             if user["pending_delivery"]:
                 items_list = "\n".join(f"• {item}" for item in user["pending_delivery"])
                 bot.send_message(chat_id, f"Выберите что приехало (через запятую или с новой строки):\n{items_list}")
@@ -248,7 +253,6 @@ def handle_any_message(message):
         start(message)
         return
 
-    # === ЗАКАЗЫ ===
     if text == "🛍 Заказ":
         if user.get("saved_order"):
             user["order_items"] = user["saved_order"].copy()
@@ -342,7 +346,6 @@ def handle_any_message(message):
         user["stage"] = "order_input"
         return
 
-    # === ПРИЕМ ПОСТАВКИ ===
     if text == "📦 Прием поставки":
         user["stage"] = "choose_shop_delivery"
         bot.send_message(chat_id, "Выберите магазин для приемки поставки:", reply_markup=get_shop_menu())
@@ -379,7 +382,6 @@ def handle_any_message(message):
         user["stage"] = "main"
         return
 
-    # === ФИНАНСЫ ===
     if text == "❌ Отменить":
         user.update({"mode": "add", "cash": 0, "terminal": 0, "stage": "main"})
         bot.send_message(chat_id, "❌ Действие отменено. Выберите действие:", reply_markup=get_main_menu())
@@ -406,150 +408,149 @@ def handle_any_message(message):
     if text == "📄 Составить отчёт":
         user["stage"] = "cash_input"
         total = sum(user["transfers"])
-        bot.send_message(chat_id, f"🧾 Переводов на сумму: <b>{total}₽</b>\nВведите сумму наличных:")
+        bot.send_message(chat_id, f"🧾 Переводов за смену: <b>{total}₽</b>\n"
+                                  f"Введите сумму наличных:")
         return
 
-    # === ЧИСЛОВОЙ ВВОД ===
-    stage = user.get("stage", "main")  # Вынес сюда, чтобы не было ошибки
-
-    if text.isdigit():
-        amount = int(text)
-
-        if stage == "amount_input":
-            user["transfers"].append(-amount if user["mode"] == "subtract" else amount)
-            bot.send_message(chat_id, f"{'➖ Возврат' if user['mode'] == 'subtract' else '✅ Добавлено'}: {amount}₽")
-            total = sum(user["transfers"])
-            bot.send_message(chat_id, f"💰 Текущая сумма: <b>{total}₽</b>", reply_markup=get_main_menu())
-            user["mode"] = "add"
-            user["stage"] = "main"
+    if user["stage"] == "amount_input":
+        try:
+            amount = int(text.replace(' ', ''))
+        except:
+            bot.send_message(chat_id, "⚠️ Пожалуйста, введите корректное число.")
             return
 
-        elif stage == "cash_input":
-            user["cash"] = amount
-            user["stage"] = "terminal_input"
-            bot.send_message(chat_id, "Сколько по терминалу:")
+        if user["mode"] == "add":
+            user["transfers"].append(amount)
+            bot.send_message(chat_id, f"Добавлено: {amount}₽")
+        elif user["mode"] == "subtract":
+            user["transfers"].append(-amount)
+            bot.send_message(chat_id, f"Возврат на сумму: {amount}₽")
+
+        user["stage"] = "main"
+        bot.send_message(chat_id, "Выберите действие:", reply_markup=get_main_menu())
+        return
+
+    if user["stage"] == "cash_input":
+        try:
+            cash = int(text.replace(' ', ''))
+            user["cash"] = cash
+        except:
+            bot.send_message(chat_id, "⚠️ Введите корректное число наличных.")
+            return
+        user["stage"] = "terminal_input"
+        bot.send_message(chat_id, "Введите сумму с терминала:")
+        return
+
+    if user["stage"] == "terminal_input":
+        try:
+            terminal = int(text.replace(' ', ''))
+            user["terminal"] = terminal
+        except:
+            bot.send_message(chat_id, "⚠️ Введите корректное число терминала.")
             return
 
-        elif stage == "terminal_input":
-            user["terminal"] = amount
-            user["stage"] = "choose_employee"
-            ask_for_employees(chat_id)
-            return
+        # После ввода наличных и терминала - перейти к выбору сотрудников
+        ask_for_employees(chat_id)
+        return
 
-    # === ОБРАБОТКА ПОДТВЕРЖДЕНИЯ ОТЧЕТА ===
     if user.get("stage") == "confirm_report":
         if text == "✅ Отправить":
             send_report(chat_id)
-            user["transfers"] = []
-            user["cash"] = 0
-            user["terminal"] = 0
             user["stage"] = "main"
-            bot.send_message(chat_id, "✅ Отчёт отправлен! Выберите магазин для переводов:", reply_markup=get_shop_menu())
-            return
+            bot.send_message(chat_id, "Отчёт отправлен!", reply_markup=get_main_menu())
         elif text == "✏️ Изменить данные":
             user["stage"] = "cash_input"
             bot.send_message(chat_id, "Введите сумму наличных:")
-            return
         elif text == "🗓 Изменить дату":
-            user["stage"] = "custom_date_input"
-            bot.send_message(chat_id, "Введите дату отчёта в формате ДД.ММ.ГГГГ:")
-            return
+            bot.send_message(chat_id, "Введите дату в формате ДД.ММ.ГГГГ:")
+            user["stage"] = "date_input"
         elif text == "❌ Отмена":
             user["stage"] = "main"
-            bot.send_message(chat_id, "Отмена подтверждения отчёта.", reply_markup=get_main_menu())
-            return
-
-    # === ВВОД КАСТОМНОЙ ДАТЫ ===
-    if user.get("stage") == "custom_date_input":
-        try:
-            custom_date = datetime.strptime(text, "%d.%m.%Y")
-            user["date"] = custom_date.strftime("%d.%m.%Y")
-            user["stage"] = "confirm_report"
-            bot.send_message(chat_id, f"✅ Дата изменена на: {user['date']}")
-            preview_report(chat_id)
-        except ValueError:
-            bot.send_message(chat_id, "⚠️ Неверный формат даты. Введите в формате ДД.ММ.ГГГГ:")
+            bot.send_message(chat_id, "Отмена отчёта.", reply_markup=get_main_menu())
+        else:
+            bot.send_message(chat_id, "Пожалуйста, выберите действие из меню.", reply_markup=get_confirm_menu())
         return
 
-    bot.send_message(chat_id, "Выберите действие:", reply_markup=get_main_menu())
+    if user.get("stage") == "date_input":
+        try:
+            datetime.strptime(text, "%d.%m.%Y")
+            user["date"] = text
+            bot.send_message(chat_id, f"Дата изменена на {text}")
+            user["stage"] = "confirm_report"
+            preview_report(chat_id)
+        except:
+            bot.send_message(chat_id, "⚠️ Неверный формат даты. Введите дату ДД.ММ.ГГГГ:")
+        return
 
-# === ПРЕДПРОСМОТР ОТЧЕТА ===
+    bot.send_message(chat_id, "⚠️ Неизвестная команда или действие. Выберите из меню.", reply_markup=get_main_menu())
+
+# === ФУНКЦИИ ОТПРАВКИ ===
 def preview_report(chat_id):
-    data = user_data[chat_id]
-    shop = data["shop"]
-    transfers = sum(data["transfers"])
-    cash = data["cash"]
-    terminal = data["terminal"]
-    total = transfers + cash + terminal
-    date = data["date"]
-
-    if shop == "Янтарь":
-        if total < 40000:
-            salary = 4000
-            each = 2000
-        else:
-            each = round_to_50((total * 0.10) / 2)
-            salary = each * 2
-        salary_text = f"👔 ЗП: {salary}₽\n👤 По {each}₽ каждому"
-    else:
-        salary = max(2000, round_to_50(total * 0.10))
-        salary_text = f"👔 ЗП: {salary}₽"
+    user = user_data[chat_id]
+    transfers_sum = sum(user["transfers"])
+    cash = user.get("cash", 0)
+    terminal = user.get("terminal", 0)
+    date = user.get("date", datetime.now().strftime("%d.%m.%Y"))
+    shop = user.get("shop", "Не выбран")
+    employees = user.get("employees", [])
+    employees_str = ", ".join(employees) if employees else "Не выбран"
 
     report_text = (
         f"📦 Магазин: {shop}\n"
         f"📅 Дата: {date}\n"
-        f"💳 Переводы: {transfers}₽\n"
+        f"💳 Переводы: {transfers_sum}₽\n"
         f"💵 Наличные: {cash}₽\n"
         f"🏧 Терминал: {terminal}₽\n"
-        f"📊 Итого: {total}₽\n"
-        f"{salary_text}"
+        f"👥 Сотрудники: {employees_str}\n"
+        f"📊 Итого: {transfers_sum + cash + terminal}₽"
     )
-
     bot.send_message(chat_id, report_text, reply_markup=get_confirm_menu())
 
-# === ОТПРАВКА ОТЧЁТА В ТАБЛИЦУ И В ТГ ===
 def send_report(chat_id):
-    data = user_data[chat_id]
-    shop = data["shop"]
-    transfers = sum(data["transfers"])
-    cash = data["cash"]
-    terminal = data["terminal"]
-    date = data["date"]
+    user = user_data[chat_id]
+    transfers_sum = sum(user["transfers"])
+    cash = user.get("cash", 0)
+    terminal = user.get("terminal", 0)
+    date = user.get("date", datetime.now().strftime("%d.%m.%Y"))
+    shop = user.get("shop", "Не выбран")
+    employees = user.get("employees", [])
+    employees_str = ", ".join(employees) if employees else "Не выбран"
 
     report_text = (
         f"📦 Магазин: {shop}\n"
         f"📅 Дата: {date}\n"
-        f"💳 Переводы: {transfers}₽\n"
+        f"💳 Переводы: {transfers_sum}₽\n"
         f"💵 Наличные: {cash}₽\n"
         f"🏧 Терминал: {terminal}₽\n"
-        f"📊 Итого: {transfers + cash + terminal}₽"
+        f"👥 Сотрудники: {employees_str}\n"
+        f"📊 Итого: {transfers_sum + cash + terminal}₽"
     )
 
-    sheet.append_row([date, shop, transfers, cash, terminal])
+    # Отправляем сообщение в топик отчетов
     bot.send_message(CHAT_ID_FOR_REPORT, report_text, message_thread_id=THREAD_ID_FOR_REPORT)
 
-# === ОТПРАВКА ЗАКАЗА В ТЕЛЕГРАМ ===
+    # Записываем в Google Sheets: дата, магазин, переводы, наличные, терминал, сотрудники
+    sheet.append_row([date, shop, transfers_sum, cash, terminal, employees_str])
+
+# === ОТПРАВКА ЗАКАЗА ===
 def send_order(chat_id):
     user = user_data[chat_id]
-    shop = user.get("order_shop", "Не указан")
+    shop = user.get("order_shop", "Не выбран")
     items = user.get("order_items", [])
     photos = user.get("order_photos", [])
 
     if not items:
-        bot.send_message(chat_id, "⚠️ Заказ пуст, нечего отправлять.")
+        bot.send_message(chat_id, "⚠️ Заказ пустой, нечего отправлять.")
         return
 
-    order_text = f"🛒 Заказ для магазина: <b>{shop}</b>\n\n" + "\n".join(f"• {item}" for item in items)
+    order_text = f"🛍 Заказ для магазина <b>{shop}</b>:\n" + "\n".join(f"• {item}" for item in items)
     bot.send_message(CHAT_ID_FOR_REPORT, order_text, message_thread_id=THREAD_ID_FOR_ORDER)
 
+    # Отправляем фото в топик заказа (если есть)
     for photo in photos:
-        try:
-            bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=photo.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
-        except Exception as e:
-            print(f"Ошибка отправки фото: {e}")
+        bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=photo.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
 
-    user["last_order"] = items.copy()
-
-# === ЗАПУСК ===
-print("✅ Бот запущен...")
-bot.infinity_polling()
+# === ЗАПУСК БОТА ===
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    bot.infinity_polling()
