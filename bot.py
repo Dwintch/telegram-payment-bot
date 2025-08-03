@@ -392,14 +392,25 @@ def handle_any_message(message):
         bot.send_message(chat_id, f"📊 Сумма переводов: <b>{total}₽</b>\nКол-во транзакций: {count}")
         return
 
-    if text == "📄 Составить отчёт":
-        if not user["transfers"] and user["cash"] == 0 and user["terminal"] == 0:
-            bot.send_message(chat_id, "Нет данных для отчёта. Введите переводы и суммы.")
-            return
-        user["stage"] = "cash_input"
-        total = sum(user["transfers"])
-        bot.send_message(chat_id, f"🧾 Переводов на сумму: <b>{total}₽</b>\nВведите сумму наличных:")
-        return
+    # === СОЗДАНИЕ ОТЧЁТА ===
+if text == "📄 Составить отчёт":
+    user["stage"] = "ask_transfers"
+    bot.send_message(chat_id, "Хотите внести переводы в отчёт?", reply_markup=get_yes_no_keyboard())
+    return
+
+# === ВОПРОС: ХОТИТЕ ЛИ ВВОДИТЬ ПЕРЕВОДЫ ===
+if user.get("stage") == "ask_transfers":
+    if text == "✅ Да":
+        user["stage"] = "enter_transfers"
+        user["transfers"] = []
+        bot.send_message(chat_id, "Введите перевод (или отправьте 'Готово' для завершения):", reply_markup=get_cancel_keyboard())
+    elif text == "❌ Нет":
+        user["stage"] = "enter_cash"
+        bot.send_message(chat_id, "Введите сумму наличных:", reply_markup=get_cancel_keyboard())
+    else:
+        bot.send_message(chat_id, "Пожалуйста, выберите: ✅ Да или ❌ Нет", reply_markup=get_yes_no_keyboard())
+    return
+
 
     # --- ЧИСЛОВОЙ ВВОД ---
     if text.isdigit():
