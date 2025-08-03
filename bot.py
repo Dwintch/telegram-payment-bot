@@ -25,6 +25,7 @@ user_data = {}
 
 # === СПИСОК СОТРУДНИКОВ ===
 EMPLOYEES = ['Данил', 'Даниз', 'Даша', 'Оксана', 'Лиза', 'Соня']
+
 # === GOOGLE SHEETS ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
@@ -56,16 +57,10 @@ def get_order_action_menu():
     markup.add("💾 Сохранить заказ (не отправлять)", "❌ Отмена")
     return markup
 
-# === МЕНЮ ВЫБОРА ПЕРСОНАЛА ===
-
-EMPLOYEES = ['Данил', 'Даниз', 'Даша', 'Оксана', 'Лиза', 'Соня']
-
 def get_employee_selection_menu(selected=None):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     selected = selected or []
-
     for emp in EMPLOYEES:
-        # Если сотрудник уже выбран, показываем с галочкой
         label = f"{emp} ✅" if emp in selected else emp
         markup.add(label)
     markup.add("Готово", "❌ Отмена")
@@ -73,7 +68,7 @@ def get_employee_selection_menu(selected=None):
 
 def ask_for_employees(chat_id):
     user = user_data[chat_id]
-    user["selected_employees"] = []  # Обнуляем выбор сотрудников перед новым выбором
+    user["selected_employees"] = []
     bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu())
 
 @bot.message_handler(func=lambda m: user_data.get(m.chat.id, {}).get("stage") == "choose_employee")
@@ -83,11 +78,8 @@ def handle_employee_selection(message):
     text = message.text
 
     if text == "Готово":
-        # Проверяем, сколько сотрудников выбрано для магазина
         shop = user["shop"]
         selected = user.get("selected_employees", [])
-
-        # Правила выбора сотрудников по магазину
         if shop == "Янтарь" and len(selected) != 2:
             bot.send_message(chat_id, "Для магазина Янтарь нужно выбрать ровно двух сотрудников. Выберите ещё.")
             bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu(selected))
@@ -96,12 +88,8 @@ def handle_employee_selection(message):
             bot.send_message(chat_id, "Для магазина Хайп и Полка нужно выбрать ровно одного сотрудника. Выберите ещё.")
             bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu(selected))
             return
-
-        # Сохраняем выбор
         user["employees"] = selected
         user["stage"] = "confirm_report"
-
-        # Далее показываем отчет для подтверждения
         preview_report(chat_id)
         return
 
@@ -110,7 +98,6 @@ def handle_employee_selection(message):
         bot.send_message(chat_id, "Отмена выбора сотрудников.", reply_markup=get_main_menu())
         return
 
-    # Если нажали имя сотрудника - добавляем/удаляем из выбранных
     if text in EMPLOYEES:
         selected = user.get("selected_employees", [])
         if text in selected:
@@ -118,33 +105,10 @@ def handle_employee_selection(message):
         else:
             selected.append(text)
         user["selected_employees"] = selected
-
-        # Обновляем клавиатуру с выбранными
         bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu(selected))
         return
 
-    # Если пришло что-то другое
     bot.send_message(chat_id, "Пожалуйста, выберите сотрудника из списка или нажмите 'Готово'.")
-
-
-# === КНОПКИ ПЕРСОНАЛА ===
-
-def get_employee_selection_menu(shop, selected=None):
-    """
-    shop: строка — название магазина
-    selected: список выбранных сотрудников (имена)
-    """
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    selected = selected or []
-
-    # Варианты кнопок: имя сотрудника + отметка, если выбран
-    for emp in EMPLOYEES:
-        label = f"{emp} ✅" if emp in selected else emp
-        markup.add(label)
-
-    markup.add("Готово", "❌ Отмена")
-    return markup
-
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 def sanitize_input(text):
@@ -158,7 +122,6 @@ def format_order_list(items):
         return "📋 Заказ пуст."
     return "📋 Текущий заказ:\n" + "\n".join(f"• {item}" for item in items)
 
-# === ОКРУГЛЕНИЕ ДО 50 ===
 def round_to_50(value):
     remainder = value % 50
     if remainder < 25:
@@ -214,7 +177,6 @@ def start(message):
         "saved_order": []
     }
     bot.send_message(chat_id, "Привет! Выберите магазин для переводов:", reply_markup=get_shop_menu())
-
 # === ВЫБОР МАГАЗИНА ===
 @bot.message_handler(func=lambda m: m.text in ["Янтарь", "Хайп", "Полка"])
 def choose_shop(message):
@@ -256,17 +218,14 @@ def choose_shop(message):
         allowed_shops = ["Янтарь", "Хайп", "Полка"]
         if message.text in allowed_shops:
             user["order_shop"] = message.text
-            # Собираем все last_order из других пользователей для данного магазина
             pending = []
             for u in user_data.values():
                 if u.get("order_shop") == message.text and u.get("last_order"):
                     pending.extend(u["last_order"])
-            pending = list(set(pending))  # Уникальные товары
-
+            pending = list(set(pending))
             if "accepted_delivery" not in user:
                 user["accepted_delivery"] = []
             user["pending_delivery"] = [item for item in pending if item not in user["accepted_delivery"]]
-
             if user["pending_delivery"]:
                 items_list = "\n".join(f"• {item}" for item in user["pending_delivery"])
                 bot.send_message(chat_id, f"Выберите что приехало (через запятую или с новой строки):\n{items_list}")
@@ -451,30 +410,31 @@ def handle_any_message(message):
         return
 
     # === ЧИСЛОВОЙ ВВОД ===
+    stage = user.get("stage", "main")  # Вынес сюда, чтобы не было ошибки
+
     if text.isdigit():
         amount = int(text)
-        stage = user.get("stage", "main")
 
-    if stage == "amount_input":
-        user["transfers"].append(-amount if user["mode"] == "subtract" else amount)
-        bot.send_message(chat_id, f"{'➖ Возврат' if user['mode'] == 'subtract' else '✅ Добавлено'}: {amount}₽")
-        total = sum(user["transfers"])
-        bot.send_message(chat_id, f"💰 Текущая сумма: <b>{total}₽</b>", reply_markup=get_main_menu())
-        user["mode"] = "add"
-        user["stage"] = "main"
-        return
+        if stage == "amount_input":
+            user["transfers"].append(-amount if user["mode"] == "subtract" else amount)
+            bot.send_message(chat_id, f"{'➖ Возврат' if user['mode'] == 'subtract' else '✅ Добавлено'}: {amount}₽")
+            total = sum(user["transfers"])
+            bot.send_message(chat_id, f"💰 Текущая сумма: <b>{total}₽</b>", reply_markup=get_main_menu())
+            user["mode"] = "add"
+            user["stage"] = "main"
+            return
 
-    elif stage == "cash_input":
-        user["cash"] = amount
-        user["stage"] = "terminal_input"
-        bot.send_message(chat_id, "Сколько по терминалу:")
-        return
+        elif stage == "cash_input":
+            user["cash"] = amount
+            user["stage"] = "terminal_input"
+            bot.send_message(chat_id, "Сколько по терминалу:")
+            return
 
-    elif stage == "terminal_input":
-        user["terminal"] = amount
-        user["stage"] = "choose_employee"
-        ask_for_employees(chat_id)
-        return
+        elif stage == "terminal_input":
+            user["terminal"] = amount
+            user["stage"] = "choose_employee"
+            ask_for_employees(chat_id)
+            return
 
     # === ОБРАБОТКА ПОДТВЕРЖДЕНИЯ ОТЧЕТА ===
     if user.get("stage") == "confirm_report":
@@ -511,7 +471,6 @@ def handle_any_message(message):
             bot.send_message(chat_id, "⚠️ Неверный формат даты. Введите в формате ДД.ММ.ГГГГ:")
         return
 
-    # Если ничего из выше не сработало
     bot.send_message(chat_id, "Выберите действие:", reply_markup=get_main_menu())
 
 # === ПРЕДПРОСМОТР ОТЧЕТА ===
@@ -583,14 +542,12 @@ def send_order(chat_id):
     order_text = f"🛒 Заказ для магазина: <b>{shop}</b>\n\n" + "\n".join(f"• {item}" for item in items)
     bot.send_message(CHAT_ID_FOR_REPORT, order_text, message_thread_id=THREAD_ID_FOR_ORDER)
 
-    # Отправляем фото с подписями, если есть
     for photo in photos:
         try:
             bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=photo.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
         except Exception as e:
             print(f"Ошибка отправки фото: {e}")
 
-    # Сохраняем последний отправленный заказ у пользователя
     user["last_order"] = items.copy()
 
 # === ЗАПУСК ===
