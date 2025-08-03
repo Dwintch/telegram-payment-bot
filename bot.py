@@ -69,7 +69,6 @@ def get_order_action_menu():
     return markup
 
 def get_employee_menu(max_selection=2, current_selection=None):
-    # Кнопки с сотрудниками, помечает выбранных
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
     current_selection = current_selection or []
     buttons = []
@@ -80,7 +79,7 @@ def get_employee_menu(max_selection=2, current_selection=None):
     if current_selection:
         markup.add("✅ Завершить выбор")
     else:
-        markup.add("❌ Отмена")
+        markup.add("❌ Отменить")
     return markup
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
@@ -398,22 +397,32 @@ def handle_any_message(message):
         bot.send_message(chat_id, f"📊 Сумма переводов: <b>{total}₽</b>\nКол-во транзакций: {count}")
         return
 
-    # --- ОБРАБОТКА ЧИСЛОВОГО ВВОДА И ДАЛЬНЕЙШАЯ ЛОГИКА ---
+    # --- СОСТАВИТЬ ОТЧЁТ ---
+    if text == "📄 Составить отчёт":
+        # Проверяем есть ли переводы и суммы наличных и терминала
+        if not user["transfers"]:
+            bot.send_message(chat_id, "⚠️ Нет переводов для отчёта. Пожалуйста, сначала внесите переводы.")
+            return
+        user["stage"] = "amount_input"  # Начинаем с ввода суммы наличных
+        bot.send_message(chat_id, "Введите сумму наличных:")
+        return
+
+    # --- ЧИСЛОВОЙ ВВОД ---
     if text.isdigit():
         amount = int(text)
         stage = user.get("stage", "main")
 
         if stage == "amount_input":
-            user["transfers"].append(-amount if user["mode"] == "subtract" else amount)
-            bot.send_message(chat_id, f"{'➖ Возврат' if user['mode']=='subtract' else '✅ Добавлено'}: {amount}₽")
-            total = sum(user["transfers"])
-            bot.send_message(chat_id, f"💰 Текущая сумма: <b>{total}₽</b>\n\nВведите ещё перевод или напишите 'Готово', чтобы продолжить.", reply_markup=None)
-            return
-
-        elif stage == "cash_input":
-            user["cash"] = amount
-            user["stage"] = "terminal_input"
-            bot.send_message(chat_id, "Сколько по терминалу:")
+            # При составлении отчёта: сначала наличные, потом терминал
+            if "cash" not in user or user["cash"] == 0:
+                user["cash"] = amount
+                user["stage"] = "terminal_input"
+                bot.send_message(chat_id, "Сколько по терминалу:")
+            else:
+                user["terminal"] = amount
+                user["stage"] = "choose_employee"
+                # Приглашаем к выбору сотрудников
+                ask_for_employees(chat_id)
             return
 
         elif stage == "terminal_input":
@@ -422,13 +431,14 @@ def handle_any_message(message):
             ask_for_employees(chat_id)
             return
 
-    if text.lower() == "готово" and user.get("stage") == "amount_input":
-        if not user["transfers"]:
-            bot.send_message(chat_id, "⚠️ Сначала введите хотя бы один перевод.")
+        elif stage == "amount_input":  # Для перевода/возврата
+            user["transfers"].append(-amount if user["mode"] == "subtract" else amount)
+            bot.send_message(chat_id, f"{'➖ Возврат' if user['mode']=='subtract' else '✅ Добавлено'}: {amount}₽")
+            total = sum(user["transfers"])
+            bot.send_message(chat_id, f"💰 Текущая сумма: <b>{total}₽</b>", reply_markup=get_main_menu())
+            user["mode"] = "add"
+            user["stage"] = "main"
             return
-        user["stage"] = "cash_input"
-        bot.send_message(chat_id, "Введите сумму наличных:")
-        return
 
     # --- ВЫБОР СОТРУДНИКОВ ---
     if user.get("stage") == "choose_employee":
@@ -441,38 +451,35 @@ def handle_any_message(message):
             user["stage"] = "main"
             bot.send_message(chat_id, "Выбор сотрудников отменён.", reply_markup=get_main_menu())
             return
-
         elif text == "✅ Завершить выбор":
             shop = user.get("shop")
             count = len(user.get("employees", []))
-            required = 2 if shop == "Янтарь" else 1
-            if count != required:
-                bot.send_message(chat_id, f"⚠️ Для магазина {shop} нужно выбрать ровно {required} сотрудника(ов).")
+            if shop == "Янтарь" and count != 2:
+                bot.send_message(chat_id, "⚠️ Для магазина Янтарь нужно выбрать ровно двух сотрудников.")
+                return
+            if shop in ["Хайп", "Полка"] and count != 1:
+                bot.send_message(chat_id, "⚠️ Для магазина Хайп или Полка нужно выбрать ровно одного сотрудника.")
                 return
             user["stage"] = "confirm_report"
             preview_report(chat_id)
             return
-
         elif text_clean in EMPLOYEES:
-            max_select = 2 if user.get("shop") == "Янтарь" else 1
             if text_clean in current:
                 current.remove(text_clean)
-                user["employee_selection_count"] = max(0, user.get("employee_selection_count", 0) - 1)
+                user["employee_selection_count"] -= 1
                 bot.send_message(chat_id, f"Удалён сотрудник: {text_clean}")
             else:
+                max_select = 2 if user.get("shop") == "Янтарь" else 1
                 if user.get("employee_selection_count", 0) >= max_select:
                     bot.send_message(chat_id, f"⚠️ Можно выбрать максимум {max_select} сотрудника(ов). Уберите кого-нибудь, чтобы добавить нового.")
                     return
                 current.append(text_clean)
-                user["employee_selection_count"] = user.get("employee_selection_count", 0) + 1
+                user["employee_selection_count"] += 1
                 bot.send_message(chat_id, f"Добавлен сотрудник: {text_clean}")
-
             user["employees"] = current
-            bot.send_message(chat_id,
-                             f"Выбранные сотрудники: {', '.join(current)}",
+            bot.send_message(chat_id, f"Выбранные сотрудники: {', '.join(current)}",
                              reply_markup=get_employee_menu(max_selection=max_select, current_selection=current))
             return
-
         else:
             bot.send_message(chat_id, "Пожалуйста, выберите сотрудника с кнопок.", reply_markup=get_employee_menu(max_selection=2, current_selection=current))
             return
@@ -491,7 +498,7 @@ def handle_any_message(message):
             return
         elif text == "✏️ Изменить данные":
             user["stage"] = "amount_input"
-            bot.send_message(chat_id, "Введите сумму перевода:", reply_markup=None)
+            bot.send_message(chat_id, "Введите сумму наличных:", reply_markup=None)
             return
         elif text == "🗓 Изменить дату":
             user["stage"] = "custom_date_input"
@@ -517,10 +524,18 @@ def handle_any_message(message):
             bot.send_message(chat_id, "⚠️ Неверный формат даты. Введите в формате ДД.ММ.ГГГГ:")
         return
 
-    # --- ЕСЛИ НИЧЕГО НЕ ПОДОШЛО ---
     bot.send_message(chat_id, "Я не понял команду. Пожалуйста, выберите действие из меню.", reply_markup=get_main_menu())
 
-# === ФУНКЦИИ ПРЕДПРОСМОТРА И ОТПРАВКИ ОТЧЁТА ===
+# === ФУНКЦИИ ДЛЯ ОТЧЁТА ===
+def ask_for_employees(chat_id):
+    user = user_data[chat_id]
+    shop = user.get("shop")
+    max_select = 2 if shop == "Янтарь" else 1
+    user["employees"] = []
+    user["employee_selection_count"] = 0
+    user["stage"] = "choose_employee"
+    bot.send_message(chat_id, f"Выберите сотрудников (максимум {max_select}):", reply_markup=get_employee_menu(max_selection=max_select))
+
 def preview_report(chat_id):
     data = user_data[chat_id]
     shop = data["shop"]
@@ -528,7 +543,7 @@ def preview_report(chat_id):
     cash = data["cash"]
     terminal = data["terminal"]
     total = transfers + cash + terminal
-    date = data.get("date", datetime.now().strftime("%d.%m.%Y"))
+    date = data["date"]
     employees = data.get("employees", [])
 
     weather = get_weather()
@@ -574,7 +589,7 @@ def send_report(chat_id):
     cash = data["cash"]
     terminal = data["terminal"]
     total = transfers + cash + terminal
-    date = data.get("date", datetime.now().strftime("%d.%m.%Y"))
+    date = data["date"]
     employees = data.get("employees", [])
 
     weather = get_weather()
@@ -610,7 +625,6 @@ def send_report(chat_id):
         f"💸 Зарплата: {salary}₽ ({each}₽ на сотрудника)\n"
         f"{weather_text}"
     )
-
     bot.send_message(CHAT_ID_FOR_REPORT, report_text, message_thread_id=THREAD_ID_FOR_REPORT)
 
     try:
@@ -639,17 +653,6 @@ def send_order(chat_id):
             logging.error(f"Ошибка отправки фото заказа: {e}")
 
     user["last_order"] = items.copy()
-
-# === ВЫЗОВ ВЫБОРА СОТРУДНИКОВ ===
-def ask_for_employees(chat_id):
-    user = user_data[chat_id]
-    shop = user.get("shop")
-    max_select = 2 if shop == "Янтарь" else 1
-    user["employees"] = []
-    user["employee_selection_count"] = 0
-    bot.send_message(chat_id,
-                     f"Выберите {max_select} сотрудника(ов) для отчёта:",
-                     reply_markup=get_employee_menu(max_selection=max_select, current_selection=[]))
 
 # === ЗАПУСК БОТА ===
 if __name__ == '__main__':
