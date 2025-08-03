@@ -471,11 +471,11 @@ def handle_any_message(message):
             return
 
         elif stage == "terminal_input":
-    user["terminal"] = amount
-    user["stage"] = "choose_employee"  # Меняем стадию на выбор сотрудника
-    ask_for_employees(chat_id)
-    return
-
+            user["terminal"] = amount
+            user["stage"] = "choose_employee"  # Меняем стадию на выбор сотрудника
+              ask_for_employees(chat_id)
+            return
+    
 
     # === ОБРАБОТКА ПОДТВЕРЖДЕНИЯ ОТЧЕТА ===
     if user.get("stage") == "confirm_report":
