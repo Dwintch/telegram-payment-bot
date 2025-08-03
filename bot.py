@@ -79,7 +79,7 @@ def get_employee_menu(max_selection=2, current_selection=None):
     if current_selection:
         markup.add("✅ Завершить выбор")
     else:
-        markup.add("❌ Отменить")
+        markup.add("❌ Отмена")
     return markup
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
@@ -181,7 +181,6 @@ def choose_shop(message):
 
     text = message.text
 
-    # Если пользователь выбирает магазин в начале или после /start
     if user.get("stage") == "choose_shop":
         user.update({
             "shop": text,
@@ -202,7 +201,6 @@ def choose_shop(message):
         bot.send_message(chat_id, f"Выбран магазин: <b>{text}</b>", reply_markup=get_main_menu())
         return
 
-    # Выбор магазина для заказа
     if user.get("stage") == "choose_shop_order":
         user["order_shop"] = text
         user["order_items"] = []
@@ -211,10 +209,8 @@ def choose_shop(message):
         bot.send_message(chat_id, f"Выбран магазин для заказа: <b>{text}</b>\nВведите товары через запятую или с новой строки:", reply_markup=None)
         return
 
-    # Выбор магазина для приемки поставки
     if user.get("stage") == "choose_shop_delivery":
         user["order_shop"] = text
-        # Собираем last_order всех пользователей по этому магазину
         pending = []
         for u in user_data.values():
             if u.get("order_shop") == text and u.get("last_order"):
@@ -397,41 +393,12 @@ def handle_any_message(message):
         bot.send_message(chat_id, f"📊 Сумма переводов: <b>{total}₽</b>\nКол-во транзакций: {count}")
         return
 
-    # --- СОСТАВИТЬ ОТЧЁТ ---
-    if text == "📄 Составить отчёт":
-        # Проверяем есть ли переводы и суммы наличных и терминала
-        if not user["transfers"]:
-            bot.send_message(chat_id, "⚠️ Нет переводов для отчёта. Пожалуйста, сначала внесите переводы.")
-            return
-        user["stage"] = "amount_input"  # Начинаем с ввода суммы наличных
-        bot.send_message(chat_id, "Введите сумму наличных:")
-        return
-
     # --- ЧИСЛОВОЙ ВВОД ---
     if text.isdigit():
         amount = int(text)
         stage = user.get("stage", "main")
 
         if stage == "amount_input":
-            # При составлении отчёта: сначала наличные, потом терминал
-            if "cash" not in user or user["cash"] == 0:
-                user["cash"] = amount
-                user["stage"] = "terminal_input"
-                bot.send_message(chat_id, "Сколько по терминалу:")
-            else:
-                user["terminal"] = amount
-                user["stage"] = "choose_employee"
-                # Приглашаем к выбору сотрудников
-                ask_for_employees(chat_id)
-            return
-
-        elif stage == "terminal_input":
-            user["terminal"] = amount
-            user["stage"] = "choose_employee"
-            ask_for_employees(chat_id)
-            return
-
-        elif stage == "amount_input":  # Для перевода/возврата
             user["transfers"].append(-amount if user["mode"] == "subtract" else amount)
             bot.send_message(chat_id, f"{'➖ Возврат' if user['mode']=='subtract' else '✅ Добавлено'}: {amount}₽")
             total = sum(user["transfers"])
@@ -440,11 +407,22 @@ def handle_any_message(message):
             user["stage"] = "main"
             return
 
+        elif stage == "cash_input":
+            user["cash"] = amount
+            user["stage"] = "terminal_input"
+            bot.send_message(chat_id, "Сколько по терминалу:")
+            return
+
+        elif stage == "terminal_input":
+            user["terminal"] = amount
+            user["stage"] = "choose_employee"
+            ask_for_employees(chat_id)
+            return
+
     # --- ВЫБОР СОТРУДНИКОВ ---
     if user.get("stage") == "choose_employee":
         current = user.get("employees", [])
         text_clean = text.replace("✅ ", "").strip()
-
         if text == "❌ Отмена":
             user["employees"] = []
             user["employee_selection_count"] = 0
@@ -498,7 +476,7 @@ def handle_any_message(message):
             return
         elif text == "✏️ Изменить данные":
             user["stage"] = "amount_input"
-            bot.send_message(chat_id, "Введите сумму наличных:", reply_markup=None)
+            bot.send_message(chat_id, "Введите сумму перевода:", reply_markup=None)
             return
         elif text == "🗓 Изменить дату":
             user["stage"] = "custom_date_input"
@@ -524,26 +502,26 @@ def handle_any_message(message):
             bot.send_message(chat_id, "⚠️ Неверный формат даты. Введите в формате ДД.ММ.ГГГГ:")
         return
 
+    # --- ЕСЛИ НИЧЕГО НЕ ПОДОШЛО ---
     bot.send_message(chat_id, "Я не понял команду. Пожалуйста, выберите действие из меню.", reply_markup=get_main_menu())
 
-# === ФУНКЦИИ ДЛЯ ОТЧЁТА ===
 def ask_for_employees(chat_id):
-    user = user_data[chat_id]
-    shop = user.get("shop")
-    max_select = 2 if shop == "Янтарь" else 1
+    user = user_data.get(chat_id)
+    if not user:
+        return
+    max_select = 2 if user.get("shop") == "Янтарь" else 1
     user["employees"] = []
     user["employee_selection_count"] = 0
-    user["stage"] = "choose_employee"
     bot.send_message(chat_id, f"Выберите сотрудников (максимум {max_select}):", reply_markup=get_employee_menu(max_selection=max_select))
 
 def preview_report(chat_id):
     data = user_data[chat_id]
     shop = data["shop"]
-    transfers = sum(data["transfers"])
-    cash = data["cash"]
-    terminal = data["terminal"]
+    transfers = sum(data["transfers"]) if data.get("transfers") else 0
+    cash = data.get("cash", 0)
+    terminal = data.get("terminal", 0)
     total = transfers + cash + terminal
-    date = data["date"]
+    date = data.get("date", datetime.now().strftime("%d.%m.%Y"))
     employees = data.get("employees", [])
 
     weather = get_weather()
@@ -553,6 +531,7 @@ def preview_report(chat_id):
     else:
         weather_text = "Погода: данные недоступны"
 
+    # Расчёт зарплаты с учётом магазина
     if shop == "Янтарь":
         if total < 40000:
             salary = 4000
@@ -585,11 +564,11 @@ def preview_report(chat_id):
 def send_report(chat_id):
     data = user_data[chat_id]
     shop = data["shop"]
-    transfers = sum(data["transfers"])
-    cash = data["cash"]
-    terminal = data["terminal"]
+    transfers = sum(data["transfers"]) if data.get("transfers") else 0
+    cash = data.get("cash", 0)
+    terminal = data.get("terminal", 0)
     total = transfers + cash + terminal
-    date = data["date"]
+    date = data.get("date", datetime.now().strftime("%d.%m.%Y"))
     employees = data.get("employees", [])
 
     weather = get_weather()
@@ -632,7 +611,6 @@ def send_report(chat_id):
     except Exception as e:
         logging.error(f"Ошибка записи в Google Sheets: {e}")
 
-# === ОТПРАВКА ЗАКАЗА ===
 def send_order(chat_id):
     user = user_data[chat_id]
     shop = user.get("order_shop")
@@ -654,7 +632,6 @@ def send_order(chat_id):
 
     user["last_order"] = items.copy()
 
-# === ЗАПУСК БОТА ===
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     print("Бот запущен.")
