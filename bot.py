@@ -56,6 +56,96 @@ def get_order_action_menu():
     markup.add("💾 Сохранить заказ (не отправлять)", "❌ Отмена")
     return markup
 
+# === МЕНЮ ВЫБОРА ПЕРСОНАЛА ===
+
+EMPLOYEES = ['Данил', 'Даниз', 'Даша', 'Оксана', 'Лиза', 'Соня']
+
+def get_employee_selection_menu(selected=None):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    selected = selected or []
+
+    for emp in EMPLOYEES:
+        # Если сотрудник уже выбран, показываем с галочкой
+        label = f"{emp} ✅" if emp in selected else emp
+        markup.add(label)
+    markup.add("Готово", "❌ Отмена")
+    return markup
+
+def ask_for_employees(chat_id):
+    user = user_data[chat_id]
+    user["selected_employees"] = []  # Обнуляем выбор сотрудников перед новым выбором
+    bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu())
+
+@bot.message_handler(func=lambda m: user_data.get(m.chat.id, {}).get("stage") == "choose_employee")
+def handle_employee_selection(message):
+    chat_id = message.chat.id
+    user = user_data[chat_id]
+    text = message.text
+
+    if text == "Готово":
+        # Проверяем, сколько сотрудников выбрано для магазина
+        shop = user["shop"]
+        selected = user.get("selected_employees", [])
+
+        # Правила выбора сотрудников по магазину
+        if shop == "Янтарь" and len(selected) != 2:
+            bot.send_message(chat_id, "Для магазина Янтарь нужно выбрать ровно двух сотрудников. Выберите ещё.")
+            bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu(selected))
+            return
+        elif shop in ["Хайп", "Полка"] and len(selected) != 1:
+            bot.send_message(chat_id, "Для магазина Хайп и Полка нужно выбрать ровно одного сотрудника. Выберите ещё.")
+            bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu(selected))
+            return
+
+        # Сохраняем выбор
+        user["employees"] = selected
+        user["stage"] = "confirm_report"
+
+        # Далее показываем отчет для подтверждения
+        preview_report(chat_id)
+        return
+
+    elif text == "❌ Отмена":
+        user["stage"] = "main"
+        bot.send_message(chat_id, "Отмена выбора сотрудников.", reply_markup=get_main_menu())
+        return
+
+    # Если нажали имя сотрудника - добавляем/удаляем из выбранных
+    if text in EMPLOYEES:
+        selected = user.get("selected_employees", [])
+        if text in selected:
+            selected.remove(text)
+        else:
+            selected.append(text)
+        user["selected_employees"] = selected
+
+        # Обновляем клавиатуру с выбранными
+        bot.send_message(chat_id, "Выберите сотрудника(ов):", reply_markup=get_employee_selection_menu(selected))
+        return
+
+    # Если пришло что-то другое
+    bot.send_message(chat_id, "Пожалуйста, выберите сотрудника из списка или нажмите 'Готово'.")
+
+
+# === КНОПКИ ПЕРСОНАЛА ===
+
+def get_employee_selection_menu(shop, selected=None):
+    """
+    shop: строка — название магазина
+    selected: список выбранных сотрудников (имена)
+    """
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    selected = selected or []
+
+    # Варианты кнопок: имя сотрудника + отметка, если выбран
+    for emp in EMPLOYEES:
+        label = f"{emp} ✅" if emp in selected else emp
+        markup.add(label)
+
+    markup.add("Готово", "❌ Отмена")
+    return markup
+
+
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 def sanitize_input(text):
     items = []
@@ -381,10 +471,11 @@ def handle_any_message(message):
             return
 
         elif stage == "terminal_input":
-            user["terminal"] = amount
-            user["stage"] = "confirm_report"
-            preview_report(chat_id)
-            return
+    user["terminal"] = amount
+    user["stage"] = "choose_employee"  # Меняем стадию на выбор сотрудника
+    ask_for_employees(chat_id)
+    return
+
 
     # === ОБРАБОТКА ПОДТВЕРЖДЕНИЯ ОТЧЕТА ===
     if user.get("stage") == "confirm_report":
