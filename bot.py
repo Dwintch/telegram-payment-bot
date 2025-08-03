@@ -169,7 +169,19 @@ def start(message):
         "employee_selection_count": 0
     }
     bot.send_message(chat_id, "Привет! Выберите магазин для переводов:", reply_markup=get_shop_menu())
-
+    
+ if text == "📄 Составить отчёт":
+        if not user["transfers"]:
+            bot.send_message(chat_id, "⚠️ Нет переводов для отчёта. Пожалуйста, сначала добавьте переводы.")
+            return
+        if user["cash"] == 0 and user["terminal"] == 0:
+            bot.send_message(chat_id, "⚠️ Наличные и терминал равны 0. Пожалуйста, введите суммы.")
+            user["stage"] = "cash_input"
+            return
+        user["stage"] = "confirm_report"
+        preview_report(chat_id)
+        return
+     
 # === ВЫБОР МАГАЗИНА ===
 @bot.message_handler(func=lambda m: m.text in ["Янтарь", "Хайп", "Полка"])
 def choose_shop(message):
