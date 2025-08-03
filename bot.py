@@ -451,13 +451,13 @@ def handle_any_message(message):
         return
 
     # === ЧИСЛОВОЙ ВВОД ===
-if text.isdigit():
+    if text.isdigit():
     amount = int(text)
     stage = user.get("stage", "main")
 
     if stage == "amount_input":
         user["transfers"].append(-amount if user["mode"] == "subtract" else amount)
-        bot.send_message(chat_id, f"{'➖ Возврат' if user['mode']=='subtract' else '✅ Добавлено'}: {amount}₽")
+        bot.send_message(chat_id, f"{'➖ Возврат' if user['mode'] == 'subtract' else '✅ Добавлено'}: {amount}₽")
         total = sum(user["transfers"])
         bot.send_message(chat_id, f"💰 Текущая сумма: <b>{total}₽</b>", reply_markup=get_main_menu())
         user["mode"] = "add"
@@ -472,7 +472,7 @@ if text.isdigit():
 
     elif stage == "terminal_input":
         user["terminal"] = amount
-        user["stage"] = "choose_employee"  # Меняем стадию на выбор сотрудника
+        user["stage"] = "choose_employee"
         ask_for_employees(chat_id)
         return
 
