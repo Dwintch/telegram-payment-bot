@@ -205,17 +205,14 @@ def choose_shop(message):
         allowed_shops = ["Янтарь", "Хайп", "Полка"]
         if message.text in allowed_shops:
             user["order_shop"] = message.text
-            # Собираем все last_order из других пользователей для данного магазина
             pending = []
             for u in user_data.values():
                 if u.get("order_shop") == message.text and u.get("last_order"):
                     pending.extend(u["last_order"])
-            pending = list(set(pending))  # Уникальные товары
-
+            pending = list(set(pending))
             if "accepted_delivery" not in user:
                 user["accepted_delivery"] = []
             user["pending_delivery"] = [item for item in pending if item not in user["accepted_delivery"]]
-
             if user["pending_delivery"]:
                 items_list = "\n".join(f"• {item}" for item in user["pending_delivery"])
                 bot.send_message(chat_id, f"Выберите что приехало (через запятую или с новой строки):\n{items_list}")
@@ -371,7 +368,7 @@ def handle_any_message(message):
 
         invalid_items = [item for item in arrived if item not in user.get("pending_delivery", [])]
         if invalid_items:
-            bot.send_message(chat_id, f"⚠️ Товар(ы) не найден(ы) в списке ожидаемых: {', '.join(invalid_items)}.\nПожалуйста, введите точные названия.")
+            bot.send_message(chat_id, f"⚠️ Товар(ы) не найден(ы) в списке ожидаемых: {', '.join(invalid_items)}.\nПожалуйста, введите точные позиции из списка.")
             return
 
         not_arrived = [item for item in user.get("pending_delivery", []) if item not in arrived]
@@ -427,10 +424,18 @@ def handle_any_message(message):
         bot.send_message(chat_id, f"🧾 Переводов на сумму: <b>{total}₽</b>\nВведите сумму наличных:")
         return
 
-    # === ЧИСЛОВОЙ ВВОД ===
+    # === ЧИСЛОВОЙ ВВОД (ДОБАВЛЕНИЕ В main) ===
     if text.isdigit():
         amount = int(text)
         stage = user.get("stage", "main")
+
+        # === ДОБАВЛЕНИЕ: если выбран магазин и stage == main, воспринимать как перевод ===
+        if stage == "main" and user.get("shop"):
+            user["transfers"].append(amount)
+            bot.send_message(chat_id, f"✅ Добавлено: {amount}₽")
+            total = sum(user["transfers"])
+            bot.send_message(chat_id, f"💰 Текущая сумма: <b>{total}₽</b>", reply_markup=get_main_menu())
+            return
 
         if stage == "amount_input":
             user["transfers"].append(-amount if user["mode"] == "subtract" else amount)
@@ -463,7 +468,7 @@ def handle_any_message(message):
             user["cash"] = 0
             user["terminal"] = 0
             user["selected_staff"] = []
-            user["stage"] = "choose_shop"  # <--- Исправление бага!
+            user["stage"] = "choose_shop"
             bot.send_message(chat_id, "✅ Отчёт отправлен! Выберите магазин для переводов:", reply_markup=get_shop_menu())
             return
         elif text == "✏️ Изменить данные":
