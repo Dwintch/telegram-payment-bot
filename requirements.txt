@@ -3,5 +3,7 @@ gspread==5.12.4
 oauth2client==4.1.3
 python-dotenv
 apscheduler==3.10.4
+schedule
 openai
 rapidfuzz
+requests
