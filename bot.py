@@ -2,6 +2,9 @@ import os
 import json
 import logging
 from datetime import datetime
+import threading
+import schedule
+import time
 
 import telebot
 from telebot import types
@@ -24,6 +27,7 @@ CREDENTIALS_FILE = 'credentials.json'
 # === НАСТРОЙКИ ПОГОДЫ ===
 OPENWEATHER_API_KEY = "0657e04209d46b14a466de79282d9ca7"
 OPENWEATHER_CITY = "Moscow"  # Можно поменять на нужный город
+WEATHER_LOG_FILE = "weather_log.json"
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')
 user_data = {}
@@ -37,22 +41,87 @@ creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope
 client = gspread.authorize(creds)
 sheet = client.open(GOOGLE_SHEET_NAME).sheet1
 
-# === ФУНКЦИЯ ПОЛУЧЕНИЯ ПОГОДЫ ===
-def get_weather():
+# === ФУНКЦИИ ДЛЯ АВТОМАТИЧЕСКОГО МОНИТОРИНГА ПОГОДЫ ===
+def get_weather_raw():
     url = f"http://api.openweathermap.org/data/2.5/weather?q={OPENWEATHER_CITY}&appid={OPENWEATHER_API_KEY}&units=metric&lang=ru"
     try:
         response = requests.get(url)
         if response.status_code == 200:
             data = response.json()
             temp = data["main"]["temp"]
-            desc = data["weather"][0]["description"]
-            return f"{temp}°C, {desc}"
+            weather_main = data["weather"][0]["main"].lower()
+            weather_desc = data["weather"][0]["description"]
+            wind_speed = data["wind"]["speed"]
+            rain = 0
+            if "rain" in data and "1h" in data["rain"]:
+                rain = data["rain"]["1h"]
+            return {
+                "timestamp": datetime.now().isoformat(),
+                "temp": temp,
+                "weather": weather_main,
+                "weather_desc": weather_desc,
+                "rain": rain,
+                "wind": wind_speed
+            }
         else:
             logging.warning(f"OpenWeather error: {response.status_code}")
-            return "нет данных"
+            return None
     except Exception as e:
         logging.error(f"Ошибка получения погоды: {e}")
-        return "нет данных"
+        return None
+
+def log_weather():
+    now = datetime.now()
+    if 9 <= now.hour < 23:
+        weather = get_weather_raw()
+        if weather:
+            try:
+                if os.path.exists(WEATHER_LOG_FILE):
+                    with open(WEATHER_LOG_FILE, "r") as f:
+                        weather_log = json.load(f)
+                else:
+                    weather_log = []
+                weather_log.append(weather)
+                with open(WEATHER_LOG_FILE, "w") as f:
+                    json.dump(weather_log, f)
+            except Exception as e:
+                logging.error(f"Ошибка сохранения погоды: {e}")
+
+def weather_monitor_thread():
+    schedule.every(10).minutes.do(log_weather)
+    while True:
+        schedule.run_pending()
+        time.sleep(5)
+
+# Запуск мониторинга в отдельном потоке
+weather_thread = threading.Thread(target=weather_monitor_thread, daemon=True)
+weather_thread.start()
+
+def get_weather_report():
+    if not os.path.exists(WEATHER_LOG_FILE):
+        return "Нет данных по погоде за сегодня."
+    with open(WEATHER_LOG_FILE, "r") as f:
+        weather_log = json.load(f)
+    today = datetime.now().date()
+    today_log = [entry for entry in weather_log if datetime.fromisoformat(entry["timestamp"]).date() == today]
+    if not today_log:
+        return "Нет данных по погоде за сегодня."
+    temps = [entry["temp"] for entry in today_log]
+    wind_speeds = [entry["wind"] for entry in today_log]
+    rain_periods = [entry for entry in today_log if entry["rain"] > 0]
+    rain_total = sum(entry["rain"] for entry in rain_periods)
+    rain_hours = len(rain_periods) * 10 / 60
+    avg_temp = round(sum(temps) / len(temps), 1)
+    avg_wind = round(sum(wind_speeds) / len(wind_speeds), 1)
+    rain_was = "да" if rain_total > 0 else "нет"
+    report = (
+        f"<b>Погодный отчёт за сегодня:</b>\n"
+        f"Средняя температура: <b>{avg_temp}°C</b>\n"
+        f"Дождь был: <b>{rain_was}</b>\n"
+        f"Дождь (время): <b>{rain_hours:.2f} ч</b>, всего выпало <b>{rain_total:.2f} мм</b>\n"
+        f"Средний ветер: <b>{avg_wind} м/с</b>"
+    )
+    return report
 
 # === КНОПКИ ===
 def get_main_menu():
@@ -79,7 +148,6 @@ def get_order_action_menu():
     markup.add("💾 Сохранить заказ (не отправлять)", "❌ Отмена")
     return markup
 
-# === КНОПКИ ДЛЯ СОТРУДНИКОВ (INLINE) ===
 def get_staff_keyboard(selected_staff=None):
     selected_staff = selected_staff or []
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -88,12 +156,10 @@ def get_staff_keyboard(selected_staff=None):
         text = f"✅ {staff}" if staff in selected_staff else staff
         callback_data = f"staff_{staff}"
         buttons.append(types.InlineKeyboardButton(text, callback_data=callback_data))
-    # Кнопка для завершения выбора
     markup.add(*buttons)
     markup.add(types.InlineKeyboardButton("Далее", callback_data="staff_done"))
     return markup
 
-# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 def sanitize_input(text):
     items = []
     for part in text.split(','):
@@ -105,7 +171,6 @@ def format_order_list(items):
         return "📋 Заказ пуст."
     return "📋 Текущий заказ:\n" + "\n".join(f"• {item}" for item in items)
 
-# === ОКРУГЛЕНИЕ ДО 50 ===
 def round_to_50(value):
     remainder = value % 50
     if remainder < 25:
@@ -113,7 +178,6 @@ def round_to_50(value):
     else:
         return int(value + (50 - remainder))
 
-# === ОБРАБОТКА ФОТО ===
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     chat_id = message.chat.id
@@ -139,7 +203,6 @@ def handle_photo(message):
         user.setdefault("delivery_photos", []).append({"file_id": file_id, "caption": caption})
         bot.send_message(chat_id, "📸 Фото и текст приняты для приемки поставки.")
 
-# === ОБРАБОТКА /START ===
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
@@ -163,7 +226,6 @@ def start(message):
     }
     bot.send_message(chat_id, "Привет! Выберите магазин для переводов:", reply_markup=get_shop_menu())
 
-# === ВЫБОР МАГАЗИНА ===
 @bot.message_handler(func=lambda m: m.text in ["Янтарь", "Хайп", "Полка"])
 def choose_shop(message):
     chat_id = message.chat.id
@@ -189,7 +251,6 @@ def choose_shop(message):
         bot.send_message(chat_id, f"Выбран магазин: <b>{message.text}</b>", reply_markup=get_main_menu())
         return
 
-    # === ОБРАБОТКА ВЫБОРА МАГАЗИНА ДЛЯ ЗАКАЗОВ ===
     if user.get("stage") == "choose_shop_order":
         allowed_shops = ["Янтарь", "Хайп", "Полка"]
         if message.text in allowed_shops:
@@ -200,7 +261,6 @@ def choose_shop(message):
             bot.send_message(chat_id, f"Выбран магазин для заказа: <b>{message.text}</b>\nВведите товары через запятую или с новой строки:")
             return
 
-    # === ОБРАБОТКА ВЫБОРА МАГАЗИНА ДЛЯ ПРИЁМКИ ===
     if user.get("stage") == "choose_shop_delivery":
         allowed_shops = ["Янтарь", "Хайп", "Полка"]
         if message.text in allowed_shops:
@@ -224,7 +284,6 @@ def choose_shop(message):
 
     bot.send_message(chat_id, "Пожалуйста, выберите магазин из меню.", reply_markup=get_shop_menu())
 
-# === ОБРАБОТКА CALLBACK ДЛЯ ВЫБОРА СОТРУДНИКОВ ===
 @bot.callback_query_handler(func=lambda call: call.data.startswith('staff_'))
 def handle_staff_callback(call):
     chat_id = call.message.chat.id
@@ -235,24 +294,20 @@ def handle_staff_callback(call):
 
     staff_name = call.data.replace('staff_', '')
     if staff_name == 'done':
-        # переход к подтверждению отчета
         user['stage'] = 'confirm_report'
         preview_report(chat_id)
         bot.answer_callback_query(call.id)
         return
 
     selected = user.setdefault('selected_staff', [])
-    # Переключаем выбор
     if staff_name in selected:
         selected.remove(staff_name)
     else:
         selected.append(staff_name)
 
-    # Обновляем клавиатуру
     bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=get_staff_keyboard(selected))
     bot.answer_callback_query(call.id)
 
-# === ОБРАБОТКА ТЕКСТА ===
 @bot.message_handler(func=lambda m: True)
 def handle_any_message(message):
     chat_id = message.chat.id
@@ -263,7 +318,6 @@ def handle_any_message(message):
         start(message)
         return
 
-    # === ЗАКАЗЫ ===
     if text == "🛍 Заказ":
         if user.get("saved_order"):
             user["order_items"] = user["saved_order"].copy()
@@ -311,7 +365,7 @@ def handle_any_message(message):
                 user["order_shop"] = None
                 user["order_photos"] = []
                 user["stage"] = "main"
-                bot.send_message(chat_id, "💾 Заказ сохранён. Чтобы отправить — зайдите в заказ и нажмите «✅ Отправить заказ»", reply_markup=get_main_menu())
+                bot.send_message(chat_id, "💾 Заказ сохранён. Чтобы отправить — зайдите в заказ и нажмите «✅ Отправить заказ»", reply_markup=get_order_action_menu())
                 return
 
             if text == "❌ Отмена":
@@ -357,7 +411,6 @@ def handle_any_message(message):
         user["stage"] = "order_input"
         return
 
-    # === ПРИЕМ ПОСТАВКИ ===
     if text == "📦 Прием поставки":
         user["stage"] = "choose_shop_delivery"
         bot.send_message(chat_id, "Выберите магазин для приемки поставки:", reply_markup=get_shop_menu())
@@ -394,7 +447,6 @@ def handle_any_message(message):
         user["stage"] = "main"
         return
 
-    # === ФИНАНСЫ ===
     if text == "❌ Отменить":
         user.update({"mode": "add", "cash": 0, "terminal": 0, "stage": "main"})
         bot.send_message(chat_id, "❌ Действие отменено. Выберите действие:", reply_markup=get_main_menu())
@@ -424,12 +476,10 @@ def handle_any_message(message):
         bot.send_message(chat_id, f"🧾 Переводов на сумму: <b>{total}₽</b>\nВведите сумму наличных:")
         return
 
-    # === ЧИСЛОВОЙ ВВОД (ДОБАВЛЕНИЕ В main) ===
     if text.isdigit():
         amount = int(text)
         stage = user.get("stage", "main")
 
-        # === ДОБАВЛЕНИЕ: если выбран магазин и stage == main, воспринимать как перевод ===
         if stage == "main" and user.get("shop"):
             user["transfers"].append(amount)
             bot.send_message(chat_id, f"✅ Добавлено: {amount}₽")
@@ -454,13 +504,11 @@ def handle_any_message(message):
 
         elif stage == "terminal_input":
             user["terminal"] = amount
-            # ВМЕСТО ПРЕДПРОСМОТРА ОТЧЁТА — ВЫБОР СОТРУДНИКОВ!
             user["stage"] = "choose_staff"
             user["selected_staff"] = []
             bot.send_message(chat_id, "Выберите сотрудников, которые были на смене:", reply_markup=get_staff_keyboard())
             return
 
-    # === ОБРАБОТКА ПОДТВЕРЖДЕНИЯ ОТЧЕТА ===
     if user.get("stage") == "confirm_report":
         if text == "✅ Отправить":
             send_report(chat_id)
@@ -484,7 +532,6 @@ def handle_any_message(message):
             bot.send_message(chat_id, "Отмена подтверждения отчёта.", reply_markup=get_main_menu())
             return
 
-    # === ВВОД КАСТОМНОЙ ДАТЫ ===
     if user.get("stage") == "custom_date_input":
         try:
             custom_date = datetime.strptime(text, "%d.%m.%Y")
@@ -496,10 +543,8 @@ def handle_any_message(message):
             bot.send_message(chat_id, "⚠️ Неверный формат даты. Введите в формате ДД.ММ.ГГГГ:")
         return
 
-    # Если ничего из выше не сработало
     bot.send_message(chat_id, "Выберите действие:", reply_markup=get_main_menu())
 
-# === ПРЕДПРОСМОТР ОТЧЕТА ===
 def preview_report(chat_id):
     data = user_data[chat_id]
     shop = data["shop"]
@@ -524,6 +569,8 @@ def preview_report(chat_id):
 
     staff_text = "👥 Сотрудники: " + (', '.join(staff) if staff else "не выбраны")
 
+    weather_report = get_weather_report()
+
     report_text = (
         f"📦 Магазин: {shop}\n"
         f"📅 Дата: {date}\n"
@@ -532,12 +579,12 @@ def preview_report(chat_id):
         f"🏧 Терминал: {terminal}₽\n"
         f"📊 Итого: {total}₽\n"
         f"{salary_text}\n"
-        f"{staff_text}"
+        f"{staff_text}\n"
+        f"{weather_report}"
     )
 
     bot.send_message(chat_id, report_text, reply_markup=get_confirm_menu())
 
-# === ОТПРАВКА ОТЧЁТА В ТАБЛИЦУ И В ТГ ===
 def send_report(chat_id):
     data = user_data[chat_id]
     shop = data["shop"]
@@ -546,7 +593,7 @@ def send_report(chat_id):
     terminal = data["terminal"]
     date = data["date"]
     staff = ', '.join(data.get("selected_staff", []))
-    weather = get_weather()  # Получаем погоду!
+    weather_report = get_weather_report()
 
     report_text = (
         f"📦 Магазин: {shop}\n"
@@ -556,14 +603,12 @@ def send_report(chat_id):
         f"🏧 Терминал: {terminal}₽\n"
         f"📊 Итого: {transfers + cash + terminal}₽\n"
         f"👥 Сотрудники: {staff if staff else 'не выбраны'}\n"
-        f"🌦️ Погода: {weather}"
+        f"{weather_report}"
     )
 
-    # Таблица: добавляем новую колонку "Сотрудники" и "Погода"
-    sheet.append_row([date, shop, transfers, cash, terminal, staff, weather])
+    sheet.append_row([date, shop, transfers, cash, terminal, staff, weather_report])
     bot.send_message(CHAT_ID_FOR_REPORT, report_text, message_thread_id=THREAD_ID_FOR_REPORT)
 
-# === ОТПРАВКА ЗАКАЗА В ТЕЛЕГРАМ ===
 def send_order(chat_id):
     user = user_data[chat_id]
     shop = user.get("order_shop", "Не указан")
@@ -577,16 +622,13 @@ def send_order(chat_id):
     order_text = f"🛒 Заказ для магазина: <b>{shop}</b>\n\n" + "\n".join(f"• {item}" for item in items)
     bot.send_message(CHAT_ID_FOR_REPORT, order_text, message_thread_id=THREAD_ID_FOR_ORDER)
 
-    # Отправляем фото с подписями, если есть
     for photo in photos:
         try:
             bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=photo.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
         except Exception as e:
             print(f"Ошибка отправки фото: {e}")
 
-    # Сохраняем последний отправленный заказ у пользователя
     user["last_order"] = items.copy()
 
-# === ЗАПУСК ===
 print("✅ Бот запущен...")
 bot.infinity_polling()
