@@ -5,3 +5,4 @@ python-dotenv
 apscheduler==3.10.4
 openai
 rapidfuzz
+schedule
