@@ -608,6 +608,30 @@ def send_report(chat_id):
 
     sheet.append_row([date, shop, transfers, cash, terminal, staff, weather_report])
     bot.send_message(CHAT_ID_FOR_REPORT, report_text, message_thread_id=THREAD_ID_FOR_REPORT)
+    
+    # Отправка фото из заказов и приемки поставки
+    order_photos = data.get("order_photos", [])
+    delivery_photos = data.get("delivery_photos", [])
+    
+    # Отправляем фото заказов
+    for photo in order_photos:
+        try:
+            caption = photo.get("caption", "")
+            if caption:
+                caption = f"📦 Заказ: {caption}"
+            bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=caption, message_thread_id=THREAD_ID_FOR_REPORT)
+        except Exception as e:
+            print(f"Ошибка отправки фото заказа: {e}")
+    
+    # Отправляем фото приемки поставки
+    for photo in delivery_photos:
+        try:
+            caption = photo.get("caption", "")
+            if caption:
+                caption = f"📦 Приемка: {caption}"
+            bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=caption, message_thread_id=THREAD_ID_FOR_REPORT)
+        except Exception as e:
+            print(f"Ошибка отправки фото приемки: {e}")
 
 def send_order(chat_id):
     user = user_data[chat_id]
