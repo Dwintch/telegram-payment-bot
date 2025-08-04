@@ -212,3 +212,4 @@ marimo/_lsp/
 __marimo__/
 >>>>>>> 28a8cffb7fd0166702dd9c81dadc29590dc4d5a1
 credentials.json
+weather_log.json
