@@ -132,9 +132,11 @@ def get_main_menu():
     markup.add("❌ Отменить")
     return markup
 
-def get_shop_menu():
+def get_shop_menu(show_back_button=False):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("Янтарь", "Хайп", "Полка")
+    if show_back_button:
+        markup.add("⬅️ Назад")
     return markup
 
 def get_confirm_menu():
@@ -328,7 +330,12 @@ def handle_any_message(message):
                              reply_markup=get_order_action_menu())
         else:
             user["stage"] = "choose_shop_order"
-            bot.send_message(chat_id, "Выберите магазин для заказа:", reply_markup=get_shop_menu())
+            bot.send_message(chat_id, "Выберите магазин для заказа:", reply_markup=get_shop_menu(show_back_button=True))
+        return
+
+    if text == "⬅️ Назад" and user.get("stage") == "choose_shop_order":
+        user["stage"] = "main"
+        bot.send_message(chat_id, "Возвращаемся в главное меню.", reply_markup=get_main_menu())
         return
 
     if user["stage"] == "order_input":
