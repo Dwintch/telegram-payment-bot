@@ -151,7 +151,7 @@ def get_confirm_menu():
 def get_order_action_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("✅ Отправить заказ", "✏️ Изменить заказ")
-    markup.add("💾 Сохранить заказ (не отправлять)", "➕ До-заказ", "❌ Отмена")
+    markup.add("💾 Сохранить заказ (не отправлять)", "❌ Отмена")
     return markup
 
 def get_delivery_confirm_menu():
@@ -236,7 +236,7 @@ def handle_media(message):
         return
 
     stage = user.get("stage")
-    if stage not in ["order_input", "delivery_confirm", "order_append"]:
+    if stage not in ["order_input", "delivery_confirm"]:
         bot.send_message(chat_id, "📷/🎬 Медиа получено, но сейчас вы не оформляете заказ/приемку/до-заказ.")
         return
 
@@ -317,6 +317,8 @@ def choose_shop(message):
         allowed_shops = ["Янтарь", "Хайп", "Полка"]
         if message.text in allowed_shops:
             user["order_shop"] = message.text
+            shop = message.text
+            
             # Enhanced automatic leftovers handling
             leftovers = user.get("pending_delivery", [])
             user["order_items"] = leftovers.copy() if leftovers else []
@@ -324,20 +326,51 @@ def choose_shop(message):
             user["order_videos"] = []
             user["order_is_appended"] = False
             user["original_order_count"] = 0
+            
+            # Automatic order aggregation: check if there's an existing order for this shop
+            existing_order_combined = False
+            if shop in shop_order_messages:
+                # There's an existing order for this shop, automatically combine it
+                old_photos = shop_order_messages[shop].get("photos", [])
+                old_videos = shop_order_messages[shop].get("videos", [])
+                
+                # Add old media to current order
+                user["order_photos"] = old_photos.copy()
+                user["order_videos"] = old_videos.copy()
+                
+                # Mark this as an automatically appended order
+                user["order_is_appended"] = True
+                user["original_order_count"] = len(user["order_items"])
+                existing_order_combined = True
+            
             user["stage"] = "order_input"
+            
+            # Prepare messages based on what was combined
+            messages = []
             
             if leftovers:
                 leftovers_text = "\n".join(f"• {item}" for item in leftovers)
-                warning_msg = (
+                messages.append(
                     f"⚠️ <b>Автоматически добавлены товары из прошлой поставки:</b>\n"
                     f"{leftovers_text}\n\n"
-                    f"📝 Эти позиции <b>уже добавлены в новый заказ</b>.\n"
-                    f"Вы можете дополнить заказ или убрать ненужные позиции."
+                    f"📝 Эти позиции <b>уже добавлены в новый заказ</b>."
                 )
-                bot.send_message(chat_id, warning_msg)
             
-            shop_msg = f"🛒 Выбран магазин для заказа: <b>{message.text}</b>\n"
-            if not leftovers:
+            if existing_order_combined:
+                media_count = len(user["order_photos"]) + len(user["order_videos"])
+                media_info = f"\n📎 Медиа из старого заказа: {media_count}" if media_count > 0 else ""
+                messages.append(
+                    f"🔄 <b>Обнаружен существующий заказ для магазина {shop}</b>\n"
+                    f"Заказы будут автоматически объединены при отправке.{media_info}"
+                )
+            
+            # Send information messages
+            for msg in messages:
+                bot.send_message(chat_id, msg)
+            
+            # Main shop selection message
+            shop_msg = f"🛒 Выбран магазин для заказа: <b>{shop}</b>\n"
+            if not leftovers and not existing_order_combined:
                 shop_msg += "📝 Введите товары через запятую или с новой строки:"
             else:
                 shop_msg += "📝 Можете дополнить заказ или изменить его:"
@@ -512,9 +545,9 @@ def handle_any_message(message):
             bot.send_message(chat_id, "Выберите магазин для заказа:", reply_markup=get_shop_menu(include_back=True))
         return
 
-    # До-заказ
+    # Order handling
     if user["stage"] == "order_input":
-        if text in ["✅ Отправить заказ", "✏️ Изменить заказ", "💾 Сохранить заказ (не отправлять)", "➕ До-заказ", "❌ Отмена"]:
+        if text in ["✅ Отправить заказ", "✏️ Изменить заказ", "💾 Сохранить заказ (не отправлять)", "❌ Отмена"]:
             if text == "✅ Отправить заказ":
                 if not user["order_items"]:
                     bot.send_message(chat_id, "⚠️ Заказ пуст, нечего отправлять.")
@@ -536,41 +569,6 @@ def handle_any_message(message):
                 
                 success_msg = "✅ Заказ дополнен и отправлен!" if is_appended else "✅ Заказ отправлен!"
                 bot.send_message(chat_id, success_msg, reply_markup=get_main_menu())
-                return
-
-            if text == "➕ До-заказ":
-                # Получаем последний заказ для объединения
-                shop = user.get("order_shop")
-                if shop and shop in shop_order_messages:
-                    # Объединяем существующие медиа из старого заказа
-                    old_photos = shop_order_messages[shop].get("photos", [])
-                    old_videos = shop_order_messages[shop].get("videos", [])
-                    
-                    # Добавляем старые медиа к текущим (если их еще нет)
-                    current_photos = user.get("order_photos", [])
-                    current_videos = user.get("order_videos", [])
-                    
-                    for old_photo in old_photos:
-                        if old_photo not in current_photos:
-                            current_photos.append(old_photo)
-                    
-                    for old_video in old_videos:
-                        if old_video not in current_videos:
-                            current_videos.append(old_video)
-                    
-                    user["order_photos"] = current_photos
-                    user["order_videos"] = current_videos
-                
-                # Record that we're making an appended order
-                user["order_is_appended"] = True
-                if user.get("original_order_count") == 0:
-                    user["original_order_count"] = len(user.get("order_items", []))
-                user["stage"] = "order_append"
-                
-                media_count = len(user.get("order_photos", [])) + len(user.get("order_videos", []))
-                media_info = f"\n📎 Прикреплено медиа: {media_count}" if media_count > 0 else ""
-                
-                bot.send_message(chat_id, f"➕ <b>До-заказ</b>\n✏️ Введите позиции для до-заказа через запятую или с новой строки. Можно прикреплять фото/видео для уточнения.{media_info}")
                 return
 
             if text == "✏️ Изменить заказ":
@@ -618,20 +616,6 @@ def handle_any_message(message):
                 bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
             else:
                 bot.send_message(chat_id, "⚠️ Введите товары через запятую или с новой строки.")
-        return
-
-    if user["stage"] == "order_append":
-        items = sanitize_input(text)
-        if items:
-            user["order_items"].extend(items)
-            # Show detailed view of the appended order
-            is_appended = user.get("order_is_appended", False)
-            original_count = user.get("original_order_count", 0)
-            order_text = format_order_list(user["order_items"], show_appended_info=is_appended, original_count=original_count)
-            bot.send_message(chat_id, f"✅ <b>Заказ дополнен!</b>\n{order_text}", reply_markup=get_order_action_menu())
-            user["stage"] = "order_input"
-        else:
-            bot.send_message(chat_id, "⚠️ Введите позиции для до-заказа.")
         return
 
     if user["stage"] == "order_edit":
@@ -917,7 +901,7 @@ def send_order(chat_id, appended=False):
         bot.send_message(chat_id, "⚠️ Заказ пуст, нечего отправлять.")
         return
 
-    # При до-заказе удаляем предыдущее сообщение заказа
+    # При автоматическом объединении заказов удаляем предыдущее сообщение заказа
     if appended and shop in shop_order_messages:
         try:
             old_message_data = shop_order_messages[shop]
@@ -929,36 +913,15 @@ def send_order(chat_id, appended=False):
     if appended:
         original_count = user.get("original_order_count", 0)
         new_items_count = len(items) - original_count
-        order_text += f"<b>✅ Заказ дополнен!</b> Добавлено позиций: {new_items_count}\n"
+        order_text += f"<b>✅ Заказ автоматически объединён!</b> Добавлено позиций: {new_items_count}\n"
     order_text += "\n" + "\n".join(f"• {item}" for item in items)
     
     # Отправляем основное сообщение с заказом
     order_message = bot.send_message(CHAT_ID_FOR_REPORT, order_text, message_thread_id=THREAD_ID_FOR_ORDER)
     
-    # Сохраняем message_id нового заказа
-    shop_order_messages[shop] = {
-        "message_id": order_message.message_id,
-        "photos": [],
-        "videos": []
-    }
-
-    # При до-заказе объединяем старые и новые медиа
+    # Используем все медиа (уже объединённые при выборе магазина)
     all_photos = photos.copy()
     all_videos = videos.copy()
-    
-    if appended and shop in shop_order_messages:
-        # Добавляем старые медиа из предыдущего заказа
-        old_photos = shop_order_messages[shop].get("photos", [])
-        old_videos = shop_order_messages[shop].get("videos", [])
-        
-        # Объединяем медиа (избегая дубликатов)
-        for old_photo in old_photos:
-            if old_photo not in all_photos:
-                all_photos.insert(0, old_photo)  # Старые фото в начале
-                
-        for old_video in old_videos:
-            if old_video not in all_videos:
-                all_videos.insert(0, old_video)  # Старые видео в начале
 
     # Отправляем все медиа вложения
     for photo in all_photos:
@@ -973,9 +936,12 @@ def send_order(chat_id, appended=False):
         except Exception as e:
             print(f"Ошибка отправки видео: {e}")
 
-    # Обновляем сохранённые медиа для этого магазина
-    shop_order_messages[shop]["photos"] = all_photos.copy()
-    shop_order_messages[shop]["videos"] = all_videos.copy()
+    # Сохраняем новый message_id и медиа для этого магазина
+    shop_order_messages[shop] = {
+        "message_id": order_message.message_id,
+        "photos": all_photos.copy(),
+        "videos": all_videos.copy()
+    }
 
     user["last_order"] = items.copy()
 
