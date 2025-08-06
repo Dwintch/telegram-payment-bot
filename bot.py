@@ -32,6 +32,9 @@ WEATHER_LOG_FILE = "weather_log.json"
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')
 user_data = {}
 
+# === ХРАНИЛИЩЕ MESSAGE_ID ЗАКАЗОВ ПО МАГАЗИНАМ ===
+shop_order_messages = {}  # {shop_name: {"message_id": int, "photos": [], "videos": []}}
+
 # === СПИСОК СОТРУДНИКОВ ===
 STAFF_LIST = ["Данил", "Даниз", "Даша", "Соня", "Оксана", "Лиза"]
 
@@ -169,6 +172,20 @@ def get_staff_keyboard(selected_staff=None):
     markup.add(types.InlineKeyboardButton("Далее", callback_data="staff_done"))
     return markup
 
+def get_delivery_keyboard(pending_items, arrived_items=None):
+    """Создаёт инлайн-клавиатуру для отметки товаров при приёмке поставки"""
+    arrived_items = arrived_items or []
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    
+    for item in pending_items:
+        status = "✅" if item in arrived_items else "❌"
+        text = f"{status} {item}"
+        callback_data = f"delivery_toggle_{pending_items.index(item)}"
+        markup.add(types.InlineKeyboardButton(text, callback_data=callback_data))
+    
+    markup.add(types.InlineKeyboardButton("📦 Отправить приёмку", callback_data="delivery_submit"))
+    return markup
+
 def sanitize_input(text):
     items = []
     for part in text.split(','):
@@ -250,6 +267,8 @@ def start(message):
         "order_date": None,
         "pending_delivery": [],
         "accepted_delivery": [],
+        "delivery_arrived": [],  # Новое поле для инлайн-кнопок приёмки
+        "delivery_message_id": None,  # ID сообщения с кнопками приёмки
         "last_order": [],
         "saved_order": [],
         "selected_staff": [],
@@ -285,6 +304,8 @@ def choose_shop(message):
             "order_date": None,
             "pending_delivery": [],
             "accepted_delivery": [],
+            "delivery_arrived": [],
+            "delivery_message_id": None,
             "selected_staff": [],
             "order_is_appended": False,
             "original_order_count": 0
@@ -336,10 +357,22 @@ def choose_shop(message):
             if "accepted_delivery" not in user:
                 user["accepted_delivery"] = []
             user["pending_delivery"] = [item for item in pending if item not in user["accepted_delivery"]]
+            
             if user["pending_delivery"]:
-                items_list = "\n".join(f"• {item}" for item in user["pending_delivery"])
-                bot.send_message(chat_id, f"Выберите что приехало (через запятую или с новой строки):\n{items_list}")
-                user["stage"] = "delivery_confirm"
+                # Новый интерфейс с инлайн-кнопками
+                user["delivery_arrived"] = []  # Список прибывших товаров
+                user["stage"] = "delivery_buttons"
+                
+                items_text = f"📦 <b>Приёмка поставки для магазина {message.text}</b>\n\n"
+                items_text += "Отметьте какие товары приехали, нажимая на кнопки:\n"
+                items_text += "✅ = приехало, ❌ = не приехало\n\n"
+                
+                delivery_msg = bot.send_message(
+                    chat_id, 
+                    items_text, 
+                    reply_markup=get_delivery_keyboard(user["pending_delivery"], user["delivery_arrived"])
+                )
+                user["delivery_message_id"] = delivery_msg.message_id
             else:
                 bot.send_message(chat_id, "Нет отложенных товаров на поставку для этого магазина.")
                 user["stage"] = "main"
@@ -370,6 +403,91 @@ def handle_staff_callback(call):
 
     bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=get_staff_keyboard(selected))
     bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('delivery_'))
+def handle_delivery_callback(call):
+    chat_id = call.message.chat.id
+    user = user_data.get(chat_id)
+    if not user or user.get('stage') != 'delivery_buttons':
+        bot.answer_callback_query(call.id, "❌ Сессия истекла")
+        return
+
+    if call.data == 'delivery_submit':
+        # Обработка завершения приёмки
+        pending_items = user.get("pending_delivery", [])
+        arrived_items = user.get("delivery_arrived", [])
+        not_arrived = [item for item in pending_items if item not in arrived_items]
+        
+        # Обновление принятых товаров
+        user.setdefault("accepted_delivery", [])
+        for item in arrived_items:
+            if item not in user["accepted_delivery"]:
+                user["accepted_delivery"].append(item)
+        user["pending_delivery"] = not_arrived
+        
+        # Создание итогового отчёта
+        report_lines = ["📦 <b>Итоговый отчёт по поставке:</b>"]
+        
+        if arrived_items:
+            report_lines.append("\n<b>✅ Приехало:</b>")
+            for item in arrived_items:
+                report_lines.append(f"✅ {item}")
+        
+        if not_arrived:
+            report_lines.append("\n<b>❌ НЕ ПРИЕХАЛО:</b>")
+            for item in not_arrived:
+                report_lines.append(f"❌ {item}")
+            report_lines.append("\n⚠️ <b>Не приехавшие товары будут автоматически добавлены в следующий заказ.</b>")
+        else:
+            report_lines.append("\n✅ <b>Всё приехало в полном объёме.</b>")
+        
+        final_report = "\n".join(report_lines)
+        bot.send_message(CHAT_ID_FOR_REPORT, final_report, message_thread_id=THREAD_ID_FOR_ORDER)
+        
+        if not_arrived:
+            user["pending_delivery"] = not_arrived.copy()
+            bot.send_message(chat_id, "❌ Товары, которые не приехали, будут автоматически добавлены в следующий заказ.", reply_markup=get_main_menu())
+        else:
+            user["pending_delivery"] = []
+            bot.send_message(chat_id, "✅ Поставка принята полностью. Остатков нет.", reply_markup=get_main_menu())
+        
+        user["accepted_delivery"] = []
+        user["delivery_arrived"] = []
+        user["stage"] = "main"
+        bot.answer_callback_query(call.id, "✅ Приёмка завершена")
+        
+        # Удаляем сообщение с кнопками
+        try:
+            bot.delete_message(chat_id, user.get("delivery_message_id"))
+        except:
+            pass
+        return
+    
+    if call.data.startswith('delivery_toggle_'):
+        # Переключение статуса товара
+        item_index = int(call.data.replace('delivery_toggle_', ''))
+        pending_items = user.get("pending_delivery", [])
+        
+        if 0 <= item_index < len(pending_items):
+            item = pending_items[item_index]
+            arrived_items = user.setdefault("delivery_arrived", [])
+            
+            if item in arrived_items:
+                arrived_items.remove(item)
+            else:
+                arrived_items.append(item)
+            
+            # Обновляем клавиатуру
+            try:
+                bot.edit_message_reply_markup(
+                    chat_id, 
+                    call.message.message_id, 
+                    reply_markup=get_delivery_keyboard(pending_items, arrived_items)
+                )
+            except:
+                pass
+        
+        bot.answer_callback_query(call.id)
 
 @bot.message_handler(func=lambda m: True)
 def handle_any_message(message):
@@ -421,12 +539,38 @@ def handle_any_message(message):
                 return
 
             if text == "➕ До-заказ":
+                # Получаем последний заказ для объединения
+                shop = user.get("order_shop")
+                if shop and shop in shop_order_messages:
+                    # Объединяем существующие медиа из старого заказа
+                    old_photos = shop_order_messages[shop].get("photos", [])
+                    old_videos = shop_order_messages[shop].get("videos", [])
+                    
+                    # Добавляем старые медиа к текущим (если их еще нет)
+                    current_photos = user.get("order_photos", [])
+                    current_videos = user.get("order_videos", [])
+                    
+                    for old_photo in old_photos:
+                        if old_photo not in current_photos:
+                            current_photos.append(old_photo)
+                    
+                    for old_video in old_videos:
+                        if old_video not in current_videos:
+                            current_videos.append(old_video)
+                    
+                    user["order_photos"] = current_photos
+                    user["order_videos"] = current_videos
+                
                 # Record that we're making an appended order
                 user["order_is_appended"] = True
                 if user.get("original_order_count") == 0:
                     user["original_order_count"] = len(user.get("order_items", []))
                 user["stage"] = "order_append"
-                bot.send_message(chat_id, "➕ <b>До-заказ</b>\n✏️ Введите позиции для до-заказа через запятую или с новой строки. Можно прикреплять фото/видео для уточнения.")
+                
+                media_count = len(user.get("order_photos", [])) + len(user.get("order_videos", []))
+                media_info = f"\n📎 Прикреплено медиа: {media_count}" if media_count > 0 else ""
+                
+                bot.send_message(chat_id, f"➕ <b>До-заказ</b>\n✏️ Введите позиции для до-заказа через запятую или с новой строки. Можно прикреплять фото/видео для уточнения.{media_info}")
                 return
 
             if text == "✏️ Изменить заказ":
@@ -519,7 +663,8 @@ def handle_any_message(message):
         bot.send_message(chat_id, "Выберите магазин для приемки поставки:", reply_markup=get_shop_menu())
         return
 
-    if user["stage"] == "delivery_confirm":
+    if user["stage"] == "delivery_confirm_old":
+        # Старый способ для совместимости (если кто-то уже в процессе)
         arrived = sanitize_input(text)
         invalid_items = [item for item in arrived if item not in user.get("pending_delivery", [])]
         if invalid_items:
@@ -772,25 +917,65 @@ def send_order(chat_id, appended=False):
         bot.send_message(chat_id, "⚠️ Заказ пуст, нечего отправлять.")
         return
 
+    # При до-заказе удаляем предыдущее сообщение заказа
+    if appended and shop in shop_order_messages:
+        try:
+            old_message_data = shop_order_messages[shop]
+            bot.delete_message(CHAT_ID_FOR_REPORT, old_message_data["message_id"])
+        except Exception as e:
+            print(f"Ошибка удаления старого сообщения заказа: {e}")
+
     order_text = f"🛒 Заказ для магазина: <b>{shop}</b>\n"
     if appended:
         original_count = user.get("original_order_count", 0)
         new_items_count = len(items) - original_count
         order_text += f"<b>✅ Заказ дополнен!</b> Добавлено позиций: {new_items_count}\n"
     order_text += "\n" + "\n".join(f"• {item}" for item in items)
-    bot.send_message(CHAT_ID_FOR_REPORT, order_text, message_thread_id=THREAD_ID_FOR_ORDER)
+    
+    # Отправляем основное сообщение с заказом
+    order_message = bot.send_message(CHAT_ID_FOR_REPORT, order_text, message_thread_id=THREAD_ID_FOR_ORDER)
+    
+    # Сохраняем message_id нового заказа
+    shop_order_messages[shop] = {
+        "message_id": order_message.message_id,
+        "photos": [],
+        "videos": []
+    }
 
-    for photo in photos:
+    # При до-заказе объединяем старые и новые медиа
+    all_photos = photos.copy()
+    all_videos = videos.copy()
+    
+    if appended and shop in shop_order_messages:
+        # Добавляем старые медиа из предыдущего заказа
+        old_photos = shop_order_messages[shop].get("photos", [])
+        old_videos = shop_order_messages[shop].get("videos", [])
+        
+        # Объединяем медиа (избегая дубликатов)
+        for old_photo in old_photos:
+            if old_photo not in all_photos:
+                all_photos.insert(0, old_photo)  # Старые фото в начале
+                
+        for old_video in old_videos:
+            if old_video not in all_videos:
+                all_videos.insert(0, old_video)  # Старые видео в начале
+
+    # Отправляем все медиа вложения
+    for photo in all_photos:
         try:
             bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=photo.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
         except Exception as e:
             print(f"Ошибка отправки фото: {e}")
 
-    for video in videos:
+    for video in all_videos:
         try:
             bot.send_video(CHAT_ID_FOR_REPORT, video["file_id"], caption=video.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
         except Exception as e:
             print(f"Ошибка отправки видео: {e}")
+
+    # Обновляем сохранённые медиа для этого магазина
+    shop_order_messages[shop]["photos"] = all_photos.copy()
+    shop_order_messages[shop]["videos"] = all_videos.copy()
 
     user["last_order"] = items.copy()
 
