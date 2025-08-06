@@ -203,6 +203,38 @@ def deduplicate_order_items(items):
             unique_items.append(item)
     return unique_items
 
+def merge_order(chat_id, new_items):
+    """Merge new items with user's previous order if exists"""
+    user = user_data.get(chat_id)
+    if not user:
+        return new_items
+    
+    previous_order = user.get("last_order", [])
+    
+    if not previous_order:
+        # No previous order, just return new items
+        return new_items
+    
+    # Combine previous order with new items
+    combined_items = previous_order + new_items
+    # Remove duplicates while preserving order
+    combined_items = deduplicate_order_items(combined_items)
+    
+    # Send informative message to user
+    previous_order_text = ", ".join(previous_order)
+    new_items_text = ", ".join(new_items)
+    combined_text = ", ".join(combined_items)
+    
+    merge_message = (
+        f"📦 <b>У тебя был заказ:</b> {previous_order_text}\n"
+        f"➕ <b>Добавляю к твоему заказу:</b> {new_items_text}\n"
+        f"🔄 <b>Вот обновлённый заказ:</b> {combined_text}"
+    )
+    
+    bot.send_message(chat_id, merge_message)
+    
+    return combined_items
+
 def format_order_list(items, arrived=None, show_appended_info=False, original_count=0):
     if not items:
         return "📋 Заказ пуст."
@@ -666,9 +698,8 @@ def handle_any_message(message):
         else:
             items = sanitize_input(text)
             if items:
-                # Add new items and deduplicate the entire order
-                user["order_items"].extend(items)
-                user["order_items"] = deduplicate_order_items(user["order_items"])
+                # Use merge_order function instead of simple addition
+                user["order_items"] = merge_order(chat_id, items)
                 
                 # Show enhanced order information if this is an appended order
                 is_appended = user.get("order_is_appended", False)
