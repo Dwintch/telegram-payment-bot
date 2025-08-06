@@ -32,6 +32,25 @@ WEATHER_LOG_FILE = "weather_log.json"
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')
 user_data = {}
 
+# === ГЛОБАЛЬНОЕ ХРАНИЛИЩЕ ДАННЫХ ПО МАГАЗИНАМ ===
+shop_data = {
+    "Янтарь": {
+        "last_order": [],
+        "pending_delivery": [],
+        "accepted_delivery": []
+    },
+    "Хайп": {
+        "last_order": [],
+        "pending_delivery": [],
+        "accepted_delivery": []
+    },
+    "Полка": {
+        "last_order": [],
+        "pending_delivery": [],
+        "accepted_delivery": []
+    }
+}
+
 # === ХРАНИЛИЩЕ MESSAGE_ID ЗАКАЗОВ ПО МАГАЗИНАМ ===
 shop_order_messages = {}  # {shop_name: {"message_id": int, "photos": [], "videos": []}}
 
@@ -204,18 +223,18 @@ def deduplicate_order_items(items):
     return unique_items
 
 def merge_order(chat_id, new_items):
-    """Merge new items with user's previous order if exists"""
+    """Merge new items with current session order items"""
     user = user_data.get(chat_id)
     if not user:
         return new_items
     
-    previous_order = user.get("last_order", [])
+    previous_order = user.get("order_items", [])
     
     if not previous_order:
-        # No previous order, just return new items
+        # No previous order in session, just return new items
         return new_items
     
-    # Combine previous order with new items
+    # Combine current session order with new items
     combined_items = previous_order + new_items
     # Remove duplicates while preserving order
     combined_items = deduplicate_order_items(combined_items)
@@ -296,27 +315,24 @@ def handle_media(message):
 def start(message):
     chat_id = message.chat.id
     user_data[chat_id] = {
-        "shop": None,
-        "order_shop": None,
-        "transfers": [],
-        "mode": "add",
-        "cash": 0,
-        "terminal": 0,
-        "stage": "choose_shop",
-        "date": datetime.now().strftime("%d.%m.%Y"),
-        "order_items": [],
-        "order_photos": [],
-        "order_videos": [],
-        "order_date": None,
-        "pending_delivery": [],
-        "accepted_delivery": [],
-        "delivery_arrived": [],  # Новое поле для инлайн-кнопок приёмки
+        # === ТОЛЬКО UI СОСТОЯНИЕ И ВРЕМЕННЫЕ ДАННЫЕ СЕССИИ ===
+        "shop": None,  # Выбранный магазин для отчетов
+        "order_shop": None,  # Выбранный магазин для заказов (временно во время сессии)
+        "transfers": [],  # Переводы для отчета
+        "mode": "add",  # Режим добавления/вычитания переводов
+        "cash": 0,  # Наличные для отчета
+        "terminal": 0,  # Терминал для отчета
+        "stage": "choose_shop",  # Стадия диалога
+        "date": datetime.now().strftime("%d.%m.%Y"),  # Дата отчета
+        "order_items": [],  # Временные товары для текущей сессии заказа
+        "order_photos": [],  # Временные фото для текущей сессии заказа
+        "order_videos": [],  # Временные видео для текущей сессии заказа
+        "delivery_arrived": [],  # Временный список прибывших товаров при приемке
         "delivery_message_id": None,  # ID сообщения с кнопками приёмки
-        "last_order": [],
-        "saved_order": [],
-        "selected_staff": [],
-        "order_is_appended": False,
-        "original_order_count": 0
+        "selected_staff": [],  # Выбранные сотрудники для отчета
+        "order_is_appended": False,  # Флаг объединения заказа (временный)
+        "original_order_count": 0,  # Количество позиций до объединения (временно)
+        "saved_order": []  # Локально сохраненный заказ пользователя
     }
     bot.send_message(chat_id, "Привет! Выберите магазин для переводов:", reply_markup=get_shop_menu())
 
@@ -344,14 +360,12 @@ def choose_shop(message):
             "order_items": [],
             "order_photos": [],
             "order_videos": [],
-            "order_date": None,
-            "pending_delivery": [],
-            "accepted_delivery": [],
             "delivery_arrived": [],
             "delivery_message_id": None,
             "selected_staff": [],
             "order_is_appended": False,
-            "original_order_count": 0
+            "original_order_count": 0,
+            "saved_order": []
         })
         bot.send_message(chat_id, f"Выбран магазин: <b>{message.text}</b>", reply_markup=get_main_menu())
         return
@@ -363,24 +377,18 @@ def choose_shop(message):
             shop = message.text
             
             # Step 1: Start with pending delivery items (leftovers from previous deliveries)
-            leftovers = user.get("pending_delivery", [])
+            # ИСПОЛЬЗУЕМ ГЛОБАЛЬНЫЕ ДАННЫЕ МАГАЗИНА
+            shop_info = shop_data[shop]
+            leftovers = shop_info["pending_delivery"].copy()
             combined_items = leftovers.copy() if leftovers else []
             
-            # Step 2: Check if there's an existing unsent order for this shop and merge it
-            existing_order_items = []
+            # Step 2: Check if there's an existing last_order for this shop and merge it
+            existing_order_items = shop_info["last_order"].copy()
             existing_order_combined = False
-            if shop in shop_order_messages:
-                # Get any existing order items for this shop from other users
-                for other_user_data in user_data.values():
-                    if (other_user_data.get("order_shop") == shop and 
-                        other_user_data.get("order_items") and
-                        other_user_data.get("stage") in ["order_input", "order_edit"]):
-                        existing_order_items.extend(other_user_data["order_items"])
-                        break
-                
-                if existing_order_items:
-                    combined_items.extend(existing_order_items)
-                    existing_order_combined = True
+            
+            if existing_order_items:
+                combined_items.extend(existing_order_items)
+                existing_order_combined = True
             
             # Step 3: Remove duplicates from combined items
             combined_items = deduplicate_order_items(combined_items)
@@ -455,28 +463,25 @@ def choose_shop(message):
         allowed_shops = ["Янтарь", "Хайп", "Полка"]
         if message.text in allowed_shops:
             user["order_shop"] = message.text
-            pending = []
-            for u in user_data.values():
-                if u.get("order_shop") == message.text and u.get("last_order"):
-                    pending.extend(u["last_order"])
-            pending = list(set(pending))
-            if "accepted_delivery" not in user:
-                user["accepted_delivery"] = []
-            user["pending_delivery"] = [item for item in pending if item not in user["accepted_delivery"]]
+            shop = message.text
             
-            if user["pending_delivery"]:
+            # ИСПОЛЬЗУЕМ ГЛОБАЛЬНЫЕ ДАННЫЕ МАГАЗИНА ДЛЯ ПРИЕМКИ
+            shop_info = shop_data[shop]
+            pending_items = shop_info["pending_delivery"].copy()
+            
+            if pending_items:
                 # Новый интерфейс с инлайн-кнопками
                 user["delivery_arrived"] = []  # Список прибывших товаров
                 user["stage"] = "delivery_buttons"
                 
-                items_text = f"📦 <b>Приёмка поставки для магазина {message.text}</b>\n\n"
+                items_text = f"📦 <b>Приёмка поставки для магазина {shop}</b>\n\n"
                 items_text += "Отметьте какие товары приехали, нажимая на кнопки:\n"
                 items_text += "✅ = приехало, ❌ = не приехало\n\n"
                 
                 delivery_msg = bot.send_message(
                     chat_id, 
                     items_text, 
-                    reply_markup=get_delivery_keyboard(user["pending_delivery"], user["delivery_arrived"])
+                    reply_markup=get_delivery_keyboard(pending_items, user["delivery_arrived"])
                 )
                 user["delivery_message_id"] = delivery_msg.message_id
             else:
@@ -518,21 +523,26 @@ def handle_delivery_callback(call):
         bot.answer_callback_query(call.id, "❌ Сессия истекла")
         return
 
+    # Получаем магазин для приемки
+    shop = user.get("order_shop")
+    if not shop or shop not in shop_data:
+        bot.answer_callback_query(call.id, "❌ Ошибка: магазин не выбран")
+        return
+    
+    shop_info = shop_data[shop]
+
     if call.data == 'delivery_submit':
         # Обработка завершения приёмки
-        pending_items = user.get("pending_delivery", [])
+        pending_items = shop_info["pending_delivery"].copy()
         arrived_items = user.get("delivery_arrived", [])
         not_arrived = [item for item in pending_items if item not in arrived_items]
         
-        # Обновление принятых товаров
-        user.setdefault("accepted_delivery", [])
-        for item in arrived_items:
-            if item not in user["accepted_delivery"]:
-                user["accepted_delivery"].append(item)
-        user["pending_delivery"] = not_arrived
+        # ОБНОВЛЯЕМ ГЛОБАЛЬНЫЕ ДАННЫЕ МАГАЗИНА
+        shop_info["accepted_delivery"].extend(arrived_items)
+        shop_info["pending_delivery"] = not_arrived.copy()
         
         # Создание итогового отчёта
-        report_lines = ["📦 <b>Итоговый отчёт по поставке:</b>"]
+        report_lines = [f"📦 <b>Итоговый отчёт по поставке для {shop}:</b>"]
         
         if arrived_items:
             report_lines.append("\n<b>✅ Приехало:</b>")
@@ -551,15 +561,14 @@ def handle_delivery_callback(call):
         bot.send_message(CHAT_ID_FOR_REPORT, final_report, message_thread_id=THREAD_ID_FOR_ORDER)
         
         if not_arrived:
-            user["pending_delivery"] = not_arrived.copy()
             bot.send_message(chat_id, "❌ Товары, которые не приехали, будут автоматически добавлены в следующий заказ.", reply_markup=get_main_menu())
         else:
-            user["pending_delivery"] = []
             bot.send_message(chat_id, "✅ Поставка принята полностью. Остатков нет.", reply_markup=get_main_menu())
         
-        user["accepted_delivery"] = []
+        # Очищаем временные данные пользователя
         user["delivery_arrived"] = []
         user["stage"] = "main"
+        user["order_shop"] = None
         bot.answer_callback_query(call.id, "✅ Приёмка завершена")
         
         # Удаляем сообщение с кнопками
@@ -572,7 +581,7 @@ def handle_delivery_callback(call):
     if call.data.startswith('delivery_toggle_'):
         # Переключение статуса товара
         item_index = int(call.data.replace('delivery_toggle_', ''))
-        pending_items = user.get("pending_delivery", [])
+        pending_items = shop_info["pending_delivery"]
         
         if 0 <= item_index < len(pending_items):
             item = pending_items[item_index]
@@ -607,29 +616,15 @@ def handle_any_message(message):
 
     if text == "🛍 Заказ":
         if user.get("saved_order"):
-            # Load saved order and apply deduplication with any pending delivery items
+            # Load saved order (no automatic pending delivery merge for saved orders)
             saved_items = user["saved_order"]
-            pending_items = user.get("pending_delivery", [])
             
-            # Combine saved order with pending delivery and deduplicate
-            combined_items = pending_items + saved_items
-            combined_items = deduplicate_order_items(combined_items)
-            
-            user["order_items"] = combined_items
-            user["order_is_appended"] = len(pending_items) > 0
-            user["original_order_count"] = len(pending_items)
+            user["order_items"] = saved_items.copy()
+            user["order_is_appended"] = False
+            user["original_order_count"] = 0
             user["stage"] = "order_input"
             
-            # Inform user about combination
-            if len(pending_items) > 0:
-                pending_text = "\n".join(f"• {item}" for item in pending_items)
-                bot.send_message(chat_id, 
-                    f"📦 <b>Автоматически добавлены товары из прошлой поставки:</b>\n"
-                    f"{pending_text}\n\n"
-                    f"💾 <b>Объединено с сохранённым заказом</b>\n"
-                    f"Удалено дублей: {len(pending_items) + len(saved_items) - len(combined_items)}")
-            
-            order_text = format_order_list(user["order_items"], show_appended_info=user.get("order_is_appended", False), original_count=user.get("original_order_count", 0))
+            order_text = format_order_list(user["order_items"], show_appended_info=False, original_count=0)
             bot.send_message(chat_id, f"💾 <b>Загружен сохранённый заказ:</b>\n{order_text}\nВы можете продолжить работу с ним.", reply_markup=get_order_action_menu())
         else:
             user["stage"] = "choose_shop_order"
@@ -738,88 +733,6 @@ def handle_any_message(message):
     if text == "📦 Прием поставки":
         user["stage"] = "choose_shop_delivery"
         bot.send_message(chat_id, "Выберите магазин для приемки поставки:", reply_markup=get_shop_menu())
-        return
-
-    if user["stage"] == "delivery_confirm_old":
-        # Старый способ для совместимости (если кто-то уже в процессе)
-        arrived = sanitize_input(text)
-        invalid_items = [item for item in arrived if item not in user.get("pending_delivery", [])]
-        if invalid_items:
-            bot.send_message(chat_id, f"⚠️ Товар(ы) не найден(ы) в списке ожидаемых: {', '.join(invalid_items)}.\nПожалуйста, введите точные названия из списка.")
-            return
-
-        not_arrived = [item for item in user.get("pending_delivery", []) if item not in arrived]
-        user.setdefault("accepted_delivery", [])
-        for item in arrived:
-            if item not in user["accepted_delivery"]:
-                user["accepted_delivery"].append(item)
-        user["pending_delivery"] = not_arrived
-
-        # Enhanced delivery confirmation display
-        arrived_list = "\n".join(f"✅ {item}" for item in arrived) if arrived else "❌ Ничего не приехало"
-        not_arrived_list = "\n".join(f"❌ {item}" for item in not_arrived) if not_arrived else "✅ Всё приехало"
-        
-        confirmation_text = (
-            "🔎 <b>Итог поставки - проверьте внимательно:</b>\n\n"
-            "<b>Приехало:</b>\n" + arrived_list + "\n\n"
-            "<b>Не приехало:</b>\n" + not_arrived_list + "\n\n"
-            "❓ <b>Точно всё правильно отметили?</b>"
-        )
-        
-        bot.send_message(chat_id, confirmation_text, reply_markup=get_delivery_confirm_menu())
-        user["stage"] = "delivery_check"
-        return
-
-    if user["stage"] == "delivery_check":
-        if text == "✅ Всё верно, отправить отчёт":
-            # Final delivery report with clear formatting
-            arrived = user.get("accepted_delivery", [])
-            not_arrived = user.get("pending_delivery", [])
-            
-            report_lines = ["📦 <b>Итоговый отчёт по поставке:</b>"]
-            
-            if arrived:
-                report_lines.append("\n<b>✅ Приехало:</b>")
-                for item in arrived:
-                    report_lines.append(f"✅ {item}")
-            
-            if not_arrived:
-                report_lines.append("\n<b>❌ НЕ ПРИЕХАЛО:</b>")
-                for item in not_arrived:
-                    report_lines.append(f"❌ {item}")
-                report_lines.append("\n⚠️ <b>Не приехавшие товары будут автоматически добавлены в следующий заказ.</b>")
-            else:
-                report_lines.append("\n✅ <b>Всё приехало в полном объёме.</b>")
-            
-            final_report = "\n".join(report_lines)
-            bot.send_message(CHAT_ID_FOR_REPORT, final_report, message_thread_id=THREAD_ID_FOR_ORDER)
-            
-            if not_arrived:
-                user["pending_delivery"] = not_arrived.copy()
-                bot.send_message(chat_id, "❌ Товары, которые не приехали, будут автоматически добавлены в следующий заказ.", reply_markup=get_main_menu())
-            else:
-                user["pending_delivery"] = []
-                bot.send_message(chat_id, "✅ Поставка принята полностью. Остатков нет.", reply_markup=get_main_menu())
-            
-            user["accepted_delivery"] = []
-            user["stage"] = "main"
-            
-        elif text == "✏️ Изменить отметки":
-            # Allow user to re-input delivery acceptance
-            pending_items = user.get("pending_delivery", []) + user.get("accepted_delivery", [])
-            user["pending_delivery"] = pending_items
-            user["accepted_delivery"] = []
-            items_list = "\n".join(f"• {item}" for item in pending_items)
-            bot.send_message(chat_id, f"📝 Введите заново что приехало (через запятую или с новой строки):\n\n<b>Список товаров:</b>\n{items_list}")
-            user["stage"] = "delivery_confirm"
-            
-        elif text == "❌ Отмена":
-            user["pending_delivery"] = []
-            user["accepted_delivery"] = []
-            user["stage"] = "main"
-            bot.send_message(chat_id, "❌ Приёмка поставки отменена.", reply_markup=get_main_menu())
-        else:
-            bot.send_message(chat_id, "⚠️ Пожалуйста, выберите действие из меню.", reply_markup=get_delivery_confirm_menu())
         return
 
     if text == "❌ Отменить":
@@ -1036,11 +949,12 @@ def send_order(chat_id, appended=False):
         "videos": all_videos.copy()
     }
 
-    user["last_order"] = items.copy()
+    # СОХРАНЯЕМ ЗАКАЗ В ГЛОБАЛЬНЫХ ДАННЫХ МАГАЗИНА
+    shop_data[shop]["last_order"] = items.copy()
     
-    # ВАЖНО: Очищаем pending_delivery после успешной отправки заказа
-    # Все товары из pending_delivery теперь отправлены в новом заказе
-    user["pending_delivery"] = []
+    # ВАЖНО: Устанавливаем pending_delivery для этого магазина
+    # При отправке нового заказа, pending_delivery переходит к новому заказу
+    shop_data[shop]["pending_delivery"] = items.copy()
 
 print("✅ Бот запущен...")
 bot.infinity_polling()
