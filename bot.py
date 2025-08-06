@@ -192,6 +192,17 @@ def sanitize_input(text):
         items.extend([x.strip() for x in part.split('\n') if x.strip()])
     return items
 
+def deduplicate_order_items(items):
+    """Remove duplicates from order items while preserving order"""
+    seen = set()
+    unique_items = []
+    for item in items:
+        item_lower = item.lower().strip()
+        if item_lower not in seen:
+            seen.add(item_lower)
+            unique_items.append(item)
+    return unique_items
+
 def format_order_list(items, arrived=None, show_appended_info=False, original_count=0):
     if not items:
         return "📋 Заказ пуст."
@@ -319,50 +330,77 @@ def choose_shop(message):
             user["order_shop"] = message.text
             shop = message.text
             
-            # Enhanced automatic leftovers handling
+            # Step 1: Start with pending delivery items (leftovers from previous deliveries)
             leftovers = user.get("pending_delivery", [])
-            user["order_items"] = leftovers.copy() if leftovers else []
-            user["order_photos"] = []
-            user["order_videos"] = []
-            user["order_is_appended"] = False
-            user["original_order_count"] = 0
+            combined_items = leftovers.copy() if leftovers else []
             
-            # Automatic order aggregation: check if there's an existing order for this shop
+            # Step 2: Check if there's an existing unsent order for this shop and merge it
+            existing_order_items = []
             existing_order_combined = False
             if shop in shop_order_messages:
-                # There's an existing order for this shop, automatically combine it
+                # Get any existing order items for this shop from other users
+                for other_user_data in user_data.values():
+                    if (other_user_data.get("order_shop") == shop and 
+                        other_user_data.get("order_items") and
+                        other_user_data.get("stage") in ["order_input", "order_edit"]):
+                        existing_order_items.extend(other_user_data["order_items"])
+                        break
+                
+                if existing_order_items:
+                    combined_items.extend(existing_order_items)
+                    existing_order_combined = True
+            
+            # Step 3: Remove duplicates from combined items
+            combined_items = deduplicate_order_items(combined_items)
+            
+            # Step 4: Set up order state
+            user["order_items"] = combined_items
+            user["order_photos"] = []
+            user["order_videos"] = []
+            user["order_is_appended"] = len(combined_items) > 0
+            user["original_order_count"] = len(combined_items)
+            
+            # Step 5: Handle existing media from previous orders
+            if shop in shop_order_messages:
                 old_photos = shop_order_messages[shop].get("photos", [])
                 old_videos = shop_order_messages[shop].get("videos", [])
-                
-                # Add old media to current order
                 user["order_photos"] = old_photos.copy()
                 user["order_videos"] = old_videos.copy()
-                
-                # Mark this as an automatically appended order
-                user["order_is_appended"] = True
-                user["original_order_count"] = len(user["order_items"])
-                existing_order_combined = True
             
             user["stage"] = "order_input"
             
-            # Prepare messages based on what was combined
+            # Step 6: Prepare informative messages about what was combined
             messages = []
             
             if leftovers:
                 leftovers_text = "\n".join(f"• {item}" for item in leftovers)
                 messages.append(
-                    f"⚠️ <b>Автоматически добавлены товары из прошлой поставки:</b>\n"
+                    f"📦 <b>Автоматически добавлены товары из прошлой поставки:</b>\n"
                     f"{leftovers_text}\n\n"
-                    f"📝 Эти позиции <b>уже добавлены в новый заказ</b>."
+                    f"⚠️ Эти позиции <b>уже добавлены в новый заказ</b> и будут отправлены автоматически."
                 )
             
-            if existing_order_combined:
+            if existing_order_items:
+                existing_text = "\n".join(f"• {item}" for item in existing_order_items)
                 media_count = len(user["order_photos"]) + len(user["order_videos"])
-                media_info = f"\n📎 Медиа из старого заказа: {media_count}" if media_count > 0 else ""
+                media_info = f"\n📎 Медиа из предыдущего заказа: {media_count}" if media_count > 0 else ""
                 messages.append(
-                    f"🔄 <b>Обнаружен существующий заказ для магазина {shop}</b>\n"
-                    f"Заказы будут автоматически объединены при отправке.{media_info}"
+                    f"🔄 <b>Объединены товары из существующего заказа для {shop}:</b>\n"
+                    f"{existing_text}{media_info}\n\n"
+                    f"✅ Заказы автоматически объединены без дублей."
                 )
+            
+            total_combined = len(combined_items)
+            if total_combined > 0:
+                if len(leftovers) > 0 and len(existing_order_items) > 0:
+                    duplicate_info = f"Удалено дублей: {len(leftovers) + len(existing_order_items) - total_combined}"
+                elif len(leftovers) > 0 or len(existing_order_items) > 0:
+                    duplicate_info = f"Всего позиций: {total_combined}"
+                else:
+                    duplicate_info = ""
+                
+                if duplicate_info:
+                    messages.append(f"📊 <b>{duplicate_info}</b>")
             
             # Send information messages
             for msg in messages:
@@ -370,10 +408,13 @@ def choose_shop(message):
             
             # Main shop selection message
             shop_msg = f"🛒 Выбран магазин для заказа: <b>{shop}</b>\n"
-            if not leftovers and not existing_order_combined:
-                shop_msg += "📝 Введите товары через запятую или с новой строки:"
+            if total_combined > 0:
+                shop_msg += f"📝 Текущий заказ содержит {total_combined} позиций. Можете дополнить заказ или отправить его:"
+                # Show current order
+                current_order_text = format_order_list(user["order_items"], show_appended_info=user.get("order_is_appended", False), original_count=user.get("original_order_count", 0))
+                bot.send_message(chat_id, current_order_text)
             else:
-                shop_msg += "📝 Можете дополнить заказ или изменить его:"
+                shop_msg += "📝 Введите товары через запятую или с новой строки:"
                 
             bot.send_message(chat_id, shop_msg, reply_markup=get_order_action_menu())
             return
@@ -534,11 +575,29 @@ def handle_any_message(message):
 
     if text == "🛍 Заказ":
         if user.get("saved_order"):
-            user["order_items"] = user["saved_order"].copy()
-            user["order_is_appended"] = False
-            user["original_order_count"] = 0
+            # Load saved order and apply deduplication with any pending delivery items
+            saved_items = user["saved_order"]
+            pending_items = user.get("pending_delivery", [])
+            
+            # Combine saved order with pending delivery and deduplicate
+            combined_items = pending_items + saved_items
+            combined_items = deduplicate_order_items(combined_items)
+            
+            user["order_items"] = combined_items
+            user["order_is_appended"] = len(pending_items) > 0
+            user["original_order_count"] = len(pending_items)
             user["stage"] = "order_input"
-            order_text = format_order_list(user["order_items"])
+            
+            # Inform user about combination
+            if len(pending_items) > 0:
+                pending_text = "\n".join(f"• {item}" for item in pending_items)
+                bot.send_message(chat_id, 
+                    f"📦 <b>Автоматически добавлены товары из прошлой поставки:</b>\n"
+                    f"{pending_text}\n\n"
+                    f"💾 <b>Объединено с сохранённым заказом</b>\n"
+                    f"Удалено дублей: {len(pending_items) + len(saved_items) - len(combined_items)}")
+            
+            order_text = format_order_list(user["order_items"], show_appended_info=user.get("order_is_appended", False), original_count=user.get("original_order_count", 0))
             bot.send_message(chat_id, f"💾 <b>Загружен сохранённый заказ:</b>\n{order_text}\nВы можете продолжить работу с ним.", reply_markup=get_order_action_menu())
         else:
             user["stage"] = "choose_shop_order"
@@ -607,7 +666,10 @@ def handle_any_message(message):
         else:
             items = sanitize_input(text)
             if items:
+                # Add new items and deduplicate the entire order
                 user["order_items"].extend(items)
+                user["order_items"] = deduplicate_order_items(user["order_items"])
+                
                 # Show enhanced order information if this is an appended order
                 is_appended = user.get("order_is_appended", False)
                 original_count = user.get("original_order_count", 0)
@@ -944,6 +1006,10 @@ def send_order(chat_id, appended=False):
     }
 
     user["last_order"] = items.copy()
+    
+    # ВАЖНО: Очищаем pending_delivery после успешной отправки заказа
+    # Все товары из pending_delivery теперь отправлены в новом заказе
+    user["pending_delivery"] = []
 
 print("✅ Бот запущен...")
 bot.infinity_polling()
