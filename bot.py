@@ -302,14 +302,23 @@ def handle_media(message):
         bot.send_message(chat_id, "📷/🎬 Медиа получено, но сейчас вы не оформляете заказ/приемку/до-заказ.")
         return
 
+    # Prevent media from being added during delivery confirmation
+    if stage == "delivery_confirm":
+        bot.send_message(chat_id, "⚠️ Медиа-файлы нельзя добавлять во время приёмки поставки.")
+        return
+
     if message.content_type == 'photo':
         file_id = message.photo[-1].file_id
-        user.setdefault("order_photos", []).append({"file_id": file_id, "caption": caption})
-        bot.send_message(chat_id, "📸 Фото добавлено!")
+        # Add clarification note to caption
+        clarification_caption = f"Фото для уточнения, не отмечается в приёмке. {caption}".strip()
+        user.setdefault("order_photos", []).append({"file_id": file_id, "caption": clarification_caption})
+        bot.send_message(chat_id, "📸 Фото добавлено с пометкой для уточнения!")
     elif message.content_type == 'video':
         file_id = message.video.file_id
-        user.setdefault("order_videos", []).append({"file_id": file_id, "caption": caption})
-        bot.send_message(chat_id, "🎬 Видео добавлено!")
+        # Add clarification note to caption
+        clarification_caption = f"Видео для уточнения, не отмечается в приёмке. {caption}".strip()
+        user.setdefault("order_videos", []).append({"file_id": file_id, "caption": clarification_caption})
+        bot.send_message(chat_id, "🎬 Видео добавлено с пометкой для уточнения!")
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -383,68 +392,58 @@ def choose_shop(message):
             combined_items = leftovers.copy() if leftovers else []
             
             # Step 2: Check if there's an existing last_order for this shop and merge it
+            # BUT exclude items that have already been accepted
             existing_order_items = shop_info["last_order"].copy()
-            existing_order_combined = False
+            accepted_items = shop_info["accepted_delivery"]
             
-            if existing_order_items:
-                combined_items.extend(existing_order_items)
+            # Filter out already accepted items from existing order
+            filtered_existing_items = [item for item in existing_order_items if item not in accepted_items]
+            
+            if filtered_existing_items:
+                combined_items.extend(filtered_existing_items)
                 existing_order_combined = True
             
             # Step 3: Remove duplicates from combined items
             combined_items = deduplicate_order_items(combined_items)
             
-            # Step 4: Set up order state
+            # Step 4: Set up order state (no automatic media copying)
             user["order_items"] = combined_items
             user["order_photos"] = []
             user["order_videos"] = []
             user["order_is_appended"] = len(combined_items) > 0
             user["original_order_count"] = len(combined_items)
             
-            # Step 5: Handle existing media from previous orders
-            if shop in shop_order_messages:
-                old_photos = shop_order_messages[shop].get("photos", [])
-                old_videos = shop_order_messages[shop].get("videos", [])
-                user["order_photos"] = old_photos.copy()
-                user["order_videos"] = old_videos.copy()
+            # Note: Media files are NOT automatically copied from previous orders
+            # Users must add new media files if needed
             
             user["stage"] = "order_input"
             
-            # Step 6: Prepare informative messages about what was combined
-            messages = []
-            
-            if leftovers:
-                leftovers_text = "\n".join(f"• {item}" for item in leftovers)
-                messages.append(
-                    f"📦 <b>Автоматически добавлены товары из прошлой поставки:</b>\n"
-                    f"{leftovers_text}\n\n"
-                    f"⚠️ Эти позиции <b>уже добавлены в новый заказ</b> и будут отправлены автоматически."
-                )
-            
-            if existing_order_items:
-                existing_text = "\n".join(f"• {item}" for item in existing_order_items)
-                media_count = len(user["order_photos"]) + len(user["order_videos"])
-                media_info = f"\n📎 Медиа из предыдущего заказа: {media_count}" if media_count > 0 else ""
-                messages.append(
-                    f"🔄 <b>Объединены товары из существующего заказа для {shop}:</b>\n"
-                    f"{existing_text}{media_info}\n\n"
-                    f"✅ Заказы автоматически объединены без дублей."
-                )
-            
-            total_combined = len(combined_items)
-            if total_combined > 0:
-                if len(leftovers) > 0 and len(existing_order_items) > 0:
-                    duplicate_info = f"Удалено дублей: {len(leftovers) + len(existing_order_items) - total_combined}"
-                elif len(leftovers) > 0 or len(existing_order_items) > 0:
-                    duplicate_info = f"Всего позиций: {total_combined}"
-                else:
-                    duplicate_info = ""
+            # Step 6: Prepare consolidated info message
+            if leftovers or filtered_existing_items:
+                info_parts = []
                 
-                if duplicate_info:
-                    messages.append(f"📊 <b>{duplicate_info}</b>")
-            
-            # Send information messages
-            for msg in messages:
-                bot.send_message(chat_id, msg)
+                if leftovers and filtered_existing_items:
+                    info_parts.append(f"📦 Добавлено из прошлой поставки: {len(leftovers)} поз.")
+                    info_parts.append(f"🔄 Объединено из существующего заказа: {len(filtered_existing_items)} поз.")
+                elif leftovers:
+                    info_parts.append(f"📦 Автоматически добавлены товары из прошлой поставки ({len(leftovers)} поз.)")
+                elif filtered_existing_items:
+                    info_parts.append(f"🔄 Объединены товары из существующего заказа ({len(filtered_existing_items)} поз.)")
+                
+                total_before_dedup = len(leftovers) + len(filtered_existing_items)
+                total_combined = len(combined_items)
+                duplicates_removed = total_before_dedup - total_combined
+                
+                if duplicates_removed > 0:
+                    info_parts.append(f"🗑️ Удалено дублей: {duplicates_removed}")
+                
+                if accepted_items:
+                    info_parts.append(f"✅ Исключено уже принятых товаров: {len(accepted_items)} поз.")
+                
+                info_parts.append(f"📊 Итого позиций в заказе: {total_combined}")
+                
+                consolidated_message = f"ℹ️ <b>Информация о заказе:</b>\n" + "\n".join(f"• {part}" for part in info_parts)
+                bot.send_message(chat_id, consolidated_message)
             
             # Main shop selection message
             shop_msg = f"🛒 Выбран магазин для заказа: <b>{shop}</b>\n"
@@ -925,36 +924,33 @@ def send_order(chat_id, appended=False):
     # Отправляем основное сообщение с заказом
     order_message = bot.send_message(CHAT_ID_FOR_REPORT, order_text, message_thread_id=THREAD_ID_FOR_ORDER)
     
-    # Используем все медиа (уже объединённые при выборе магазина)
-    all_photos = photos.copy()
-    all_videos = videos.copy()
-
-    # Отправляем все медиа вложения
-    for photo in all_photos:
+    # Отправляем медиа-файлы только один раз (не сохраняем для переиспользования)
+    for photo in photos:
         try:
             bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=photo.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
         except Exception as e:
             print(f"Ошибка отправки фото: {e}")
 
-    for video in all_videos:
+    for video in videos:
         try:
             bot.send_video(CHAT_ID_FOR_REPORT, video["file_id"], caption=video.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
         except Exception as e:
             print(f"Ошибка отправки видео: {e}")
 
-    # Сохраняем новый message_id и медиа для этого магазина
+    # Сохраняем только message_id для возможного удаления при объединении заказов
+    # НЕ сохраняем медиа-файлы для переиспользования
     shop_order_messages[shop] = {
-        "message_id": order_message.message_id,
-        "photos": all_photos.copy(),
-        "videos": all_videos.copy()
+        "message_id": order_message.message_id
     }
 
     # СОХРАНЯЕМ ЗАКАЗ В ГЛОБАЛЬНЫХ ДАННЫХ МАГАЗИНА
     shop_data[shop]["last_order"] = items.copy()
     
-    # ВАЖНО: Устанавливаем pending_delivery для этого магазина
-    # При отправке нового заказа, pending_delivery переходит к новому заказу
-    shop_data[shop]["pending_delivery"] = items.copy()
+    # ВАЖНО: Обновляем pending_delivery только новыми позициями
+    # Исключаем уже принятые товары из pending_delivery
+    accepted_items = shop_data[shop]["accepted_delivery"]
+    new_pending_items = [item for item in items if item not in accepted_items]
+    shop_data[shop]["pending_delivery"] = new_pending_items
 
 print("✅ Бот запущен...")
 bot.infinity_polling()
