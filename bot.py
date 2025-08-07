@@ -405,6 +405,7 @@ def choose_shop(message):
             
             # Step 3: Remove duplicates from combined items
             combined_items = deduplicate_order_items(combined_items)
+            total_combined = len(combined_items)
             
             # Step 4: Set up order state (no automatic media copying)
             user["order_items"] = combined_items
@@ -431,7 +432,6 @@ def choose_shop(message):
                     info_parts.append(f"🔄 Объединены товары из существующего заказа ({len(filtered_existing_items)} поз.)")
                 
                 total_before_dedup = len(leftovers) + len(filtered_existing_items)
-                total_combined = len(combined_items)
                 duplicates_removed = total_before_dedup - total_combined
                 
                 if duplicates_removed > 0:
@@ -731,7 +731,7 @@ def handle_any_message(message):
 
     if text == "📦 Прием поставки":
         user["stage"] = "choose_shop_delivery"
-        bot.send_message(chat_id, "Выберите магазин для приемки поставки:", reply_markup=get_shop_menu())
+        bot.send_message(chat_id, "Выберите магазин для приемки поставки:", reply_markup=get_shop_menu(include_back=True))
         return
 
     if text == "❌ Отменить":
