@@ -392,11 +392,15 @@ def choose_shop(message):
             combined_items = leftovers.copy() if leftovers else []
             
             # Step 2: Check if there's an existing last_order for this shop and merge it
+            # BUT exclude items that have already been accepted
             existing_order_items = shop_info["last_order"].copy()
-            existing_order_combined = False
+            accepted_items = shop_info["accepted_delivery"]
             
-            if existing_order_items:
-                combined_items.extend(existing_order_items)
+            # Filter out already accepted items from existing order
+            filtered_existing_items = [item for item in existing_order_items if item not in accepted_items]
+            
+            if filtered_existing_items:
+                combined_items.extend(filtered_existing_items)
                 existing_order_combined = True
             
             # Step 3: Remove duplicates from combined items
@@ -415,23 +419,26 @@ def choose_shop(message):
             user["stage"] = "order_input"
             
             # Step 6: Prepare consolidated info message
-            if leftovers or existing_order_items:
+            if leftovers or filtered_existing_items:
                 info_parts = []
                 
-                if leftovers and existing_order_items:
+                if leftovers and filtered_existing_items:
                     info_parts.append(f"📦 Добавлено из прошлой поставки: {len(leftovers)} поз.")
-                    info_parts.append(f"🔄 Объединено из существующего заказа: {len(existing_order_items)} поз.")
+                    info_parts.append(f"🔄 Объединено из существующего заказа: {len(filtered_existing_items)} поз.")
                 elif leftovers:
                     info_parts.append(f"📦 Автоматически добавлены товары из прошлой поставки ({len(leftovers)} поз.)")
-                elif existing_order_items:
-                    info_parts.append(f"🔄 Объединены товары из существующего заказа ({len(existing_order_items)} поз.)")
+                elif filtered_existing_items:
+                    info_parts.append(f"🔄 Объединены товары из существующего заказа ({len(filtered_existing_items)} поз.)")
                 
-                total_before_dedup = len(leftovers) + len(existing_order_items)
+                total_before_dedup = len(leftovers) + len(filtered_existing_items)
                 total_combined = len(combined_items)
                 duplicates_removed = total_before_dedup - total_combined
                 
                 if duplicates_removed > 0:
                     info_parts.append(f"🗑️ Удалено дублей: {duplicates_removed}")
+                
+                if accepted_items:
+                    info_parts.append(f"✅ Исключено уже принятых товаров: {len(accepted_items)} поз.")
                 
                 info_parts.append(f"📊 Итого позиций в заказе: {total_combined}")
                 
