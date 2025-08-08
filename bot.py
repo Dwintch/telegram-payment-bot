@@ -956,31 +956,94 @@ def send_order(chat_id, appended=False):
         except Exception as e:
             print(f"Ошибка удаления старого сообщения заказа: {e}")
 
+    # Создаем новый структурированный формат сообщения заказа
     order_text = f"🛒 Заказ для магазина: <b>{shop}</b>\n"
+    
+    # Информация о переносе позиций
     if appended:
         original_count = user.get("original_order_count", 0)
         new_items_count = len(items) - original_count
-        order_text += f"<b>✅ Заказ автоматически объединён!</b> Добавлено позиций: {new_items_count}\n"
-    order_text += "\n" + "\n".join(f"• {item}" for item in items)
+        order_text += f"➕ Перенесено из прошлого заказа: {original_count} позиций\n"
+        if new_items_count > 0:
+            order_text += f"🆕 Добавлено новых позиций: {new_items_count}\n"
+    
+    # Справка по заполнению
+    order_text += "ℹ️ Пиши заказ через запятую или с новой строки, фото можно приложить для уточнения\n\n"
+    
+    # Список заказа с эмодзи
+    order_text += "📦 Заказ:\n"
+    
+    # Определяем какие позиции имеют фото/видео для уточнения
+    items_with_media = set()
+    for photo in photos:
+        # Ищем позиции, которые могут быть связаны с этим фото
+        for item in items:
+            if "фото" in item.lower():
+                items_with_media.add(item)
+    for video in videos:
+        # Ищем позиции, которые могут быть связаны с этим видео
+        for item in items:
+            if "фото" in item.lower() or "видео" in item.lower():
+                items_with_media.add(item)
+    
+    # Форматируем список позиций
+    for i, item in enumerate(items, 1):
+        if item in items_with_media:
+            order_text += f"{i}. {item} (фото)\n"
+        else:
+            order_text += f"{i}. {item}\n"
+    
+    # Добавляем информацию о вложениях, если есть медиа
+    if photos or videos:
+        media_count = len(photos) + len(videos)
+        order_text += f"\n📎 Вложения: {media_count} файл(ов) одним альбомом"
     
     # Отправляем основное сообщение с заказом
     order_message = bot.send_message(CHAT_ID_FOR_REPORT, order_text, message_thread_id=THREAD_ID_FOR_ORDER)
     
-    # Отправляем медиа-файлы только один раз (не сохраняем для переиспользования)
-    for photo in photos:
+    # Отправляем все медиа-файлы одним альбомом, если они есть
+    if photos or videos:
         try:
-            bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=photo.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
+            media_group = []
+            
+            # Добавляем фото в альбом
+            for photo in photos:
+                media_group.append(types.InputMediaPhoto(
+                    media=photo["file_id"],
+                    caption=photo.get("caption", "")
+                ))
+            
+            # Добавляем видео в альбом
+            for video in videos:
+                media_group.append(types.InputMediaVideo(
+                    media=video["file_id"],
+                    caption=video.get("caption", "")
+                ))
+            
+            # Отправляем альбом (если есть медиа-файлы)
+            if media_group:
+                bot.send_media_group(
+                    chat_id=CHAT_ID_FOR_REPORT,
+                    media=media_group,
+                    message_thread_id=THREAD_ID_FOR_ORDER
+                )
+                
         except Exception as e:
-            print(f"Ошибка отправки фото: {e}")
+            print(f"Ошибка отправки медиа-альбома: {e}")
+            # Fallback: отправляем медиа по отдельности как раньше
+            for photo in photos:
+                try:
+                    bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=photo.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
+                except Exception as photo_error:
+                    print(f"Ошибка отправки фото: {photo_error}")
 
-    for video in videos:
-        try:
-            bot.send_video(CHAT_ID_FOR_REPORT, video["file_id"], caption=video.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
-        except Exception as e:
-            print(f"Ошибка отправки видео: {e}")
+            for video in videos:
+                try:
+                    bot.send_video(CHAT_ID_FOR_REPORT, video["file_id"], caption=video.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
+                except Exception as video_error:
+                    print(f"Ошибка отправки видео: {video_error}")
 
     # Сохраняем только message_id для возможного удаления при объединении заказов
-    # НЕ сохраняем медиа-файлы для переиспользования
     shop_order_messages[shop] = {
         "message_id": order_message.message_id
     }
