@@ -1001,32 +1001,59 @@ def send_order(chat_id, appended=False):
     # Отправляем основное сообщение с заказом
     order_message = bot.send_message(CHAT_ID_FOR_REPORT, order_text, message_thread_id=THREAD_ID_FOR_ORDER)
     
-    # Отправляем все медиа-файлы одним альбомом, если они есть
+    # Отправляем все медиа-файлы альбомами, если они есть
     if photos or videos:
         try:
-            media_group = []
+            # Собираем все медиа в один список
+            all_media = []
             
             # Добавляем фото в альбом
             for photo in photos:
-                media_group.append(types.InputMediaPhoto(
+                all_media.append(types.InputMediaPhoto(
                     media=photo["file_id"],
                     caption=photo.get("caption", "")
                 ))
             
             # Добавляем видео в альбом
             for video in videos:
-                media_group.append(types.InputMediaVideo(
+                all_media.append(types.InputMediaVideo(
                     media=video["file_id"],
                     caption=video.get("caption", "")
                 ))
             
-            # Отправляем альбом (если есть медиа-файлы)
-            if media_group:
+            # Telegram ограничение: 2-10 файлов в альбоме
+            if len(all_media) == 1:
+                # Один файл - отправляем отдельно
+                media = all_media[0]
+                if media.type == 'photo':
+                    bot.send_photo(CHAT_ID_FOR_REPORT, media.media, caption=media.caption, message_thread_id=THREAD_ID_FOR_ORDER)
+                else:
+                    bot.send_video(CHAT_ID_FOR_REPORT, media.media, caption=media.caption, message_thread_id=THREAD_ID_FOR_ORDER)
+            elif len(all_media) <= 10:
+                # 2-10 файлов - отправляем одним альбомом
                 bot.send_media_group(
                     chat_id=CHAT_ID_FOR_REPORT,
-                    media=media_group,
+                    media=all_media,
                     message_thread_id=THREAD_ID_FOR_ORDER
                 )
+            else:
+                # Больше 10 файлов - разбиваем на альбомы по 10
+                for i in range(0, len(all_media), 10):
+                    chunk = all_media[i:i+10]
+                    if len(chunk) == 1:
+                        # Один файл в чанке - отправляем отдельно
+                        media = chunk[0]
+                        if media.type == 'photo':
+                            bot.send_photo(CHAT_ID_FOR_REPORT, media.media, caption=media.caption, message_thread_id=THREAD_ID_FOR_ORDER)
+                        else:
+                            bot.send_video(CHAT_ID_FOR_REPORT, media.media, caption=media.caption, message_thread_id=THREAD_ID_FOR_ORDER)
+                    else:
+                        # 2-10 файлов в чанке - отправляем альбомом
+                        bot.send_media_group(
+                            chat_id=CHAT_ID_FOR_REPORT,
+                            media=chunk,
+                            message_thread_id=THREAD_ID_FOR_ORDER
+                        )
                 
         except Exception as e:
             print(f"Ошибка отправки медиа-альбома: {e}")
