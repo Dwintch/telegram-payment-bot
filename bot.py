@@ -349,7 +349,7 @@ def start(message):
 def choose_shop(message):
     chat_id = message.chat.id
     user = user_data.get(chat_id)
-    # Кнопка Назад для заказа
+    # Кнопка Назад для заказа и поставки
     if message.text == "⬅️ Назад":
         user["stage"] = "main"
         bot.send_message(chat_id, "Вы вернулись в главное меню.", reply_markup=get_main_menu())
@@ -385,6 +385,12 @@ def choose_shop(message):
             user["order_shop"] = message.text
             shop = message.text
             
+            # Clear any previous order session state to avoid conflicts
+            user["order_photos"] = []
+            user["order_videos"] = []
+            user["delivery_arrived"] = []
+            user["delivery_message_id"] = None
+            
             # Step 1: Start with pending delivery items (leftovers from previous deliveries)
             # ИСПОЛЬЗУЕМ ГЛОБАЛЬНЫЕ ДАННЫЕ МАГАЗИНА
             shop_info = shop_data[shop]
@@ -405,20 +411,18 @@ def choose_shop(message):
             
             # Step 3: Remove duplicates from combined items
             combined_items = deduplicate_order_items(combined_items)
+            total_combined = len(combined_items)
             
-            # Step 4: Set up order state (no automatic media copying)
+            # Step 4: Set up order state
             user["order_items"] = combined_items
-            user["order_photos"] = []
-            user["order_videos"] = []
             user["order_is_appended"] = len(combined_items) > 0
             user["original_order_count"] = len(combined_items)
-            
-            # Note: Media files are NOT automatically copied from previous orders
-            # Users must add new media files if needed
-            
             user["stage"] = "order_input"
             
-            # Step 6: Prepare consolidated info message
+            # Step 5: Always send shop selection confirmation message
+            shop_msg = f"🛒 Выбран магазин для заказа: <b>{shop}</b>\n"
+            
+            # Step 6: Prepare consolidated info message if there are existing items
             if leftovers or filtered_existing_items:
                 info_parts = []
                 
@@ -431,7 +435,6 @@ def choose_shop(message):
                     info_parts.append(f"🔄 Объединены товары из существующего заказа ({len(filtered_existing_items)} поз.)")
                 
                 total_before_dedup = len(leftovers) + len(filtered_existing_items)
-                total_combined = len(combined_items)
                 duplicates_removed = total_before_dedup - total_combined
                 
                 if duplicates_removed > 0:
@@ -444,17 +447,16 @@ def choose_shop(message):
                 
                 consolidated_message = f"ℹ️ <b>Информация о заказе:</b>\n" + "\n".join(f"• {part}" for part in info_parts)
                 bot.send_message(chat_id, consolidated_message)
-            
-            # Main shop selection message
-            shop_msg = f"🛒 Выбран магазин для заказа: <b>{shop}</b>\n"
-            if total_combined > 0:
+                
                 shop_msg += f"📝 Текущий заказ содержит {total_combined} позиций. Можете дополнить заказ или отправить его:"
+                
                 # Show current order
                 current_order_text = format_order_list(user["order_items"], show_appended_info=user.get("order_is_appended", False), original_count=user.get("original_order_count", 0))
                 bot.send_message(chat_id, current_order_text)
             else:
                 shop_msg += "📝 Введите товары через запятую или с новой строки:"
-                
+            
+            # Always send the shop selection message and menu
             bot.send_message(chat_id, shop_msg, reply_markup=get_order_action_menu())
             return
 
@@ -464,13 +466,16 @@ def choose_shop(message):
             user["order_shop"] = message.text
             shop = message.text
             
+            # Clear any previous delivery session state
+            user["delivery_arrived"] = []
+            user["delivery_message_id"] = None
+            
             # ИСПОЛЬЗУЕМ ГЛОБАЛЬНЫЕ ДАННЫЕ МАГАЗИНА ДЛЯ ПРИЕМКИ
             shop_info = shop_data[shop]
             pending_items = shop_info["pending_delivery"].copy()
             
             if pending_items:
                 # Новый интерфейс с инлайн-кнопками
-                user["delivery_arrived"] = []  # Список прибывших товаров
                 user["stage"] = "delivery_buttons"
                 
                 items_text = f"📦 <b>Приёмка поставки для магазина {shop}</b>\n\n"
@@ -484,11 +489,18 @@ def choose_shop(message):
                 )
                 user["delivery_message_id"] = delivery_msg.message_id
             else:
-                bot.send_message(chat_id, "Нет отложенных товаров на поставку для этого магазина.")
+                bot.send_message(chat_id, f"📦 <b>Магазин {shop} выбран для приёмки поставки.</b>\n\nНет отложенных товаров на поставку для этого магазина.", reply_markup=get_main_menu())
                 user["stage"] = "main"
             return
 
-    bot.send_message(chat_id, "Пожалуйста, выберите магазин из меню.", reply_markup=get_shop_menu(include_back=(user.get("stage") == "choose_shop_order")))
+    # Handle invalid shop selection based on current stage
+    current_stage = user.get("stage")
+    if current_stage == "choose_shop_order":
+        bot.send_message(chat_id, "Пожалуйста, выберите магазин из меню.", reply_markup=get_shop_menu(include_back=True))
+    elif current_stage == "choose_shop_delivery":
+        bot.send_message(chat_id, "Пожалуйста, выберите магазин из меню.", reply_markup=get_shop_menu(include_back=True))
+    else:
+        bot.send_message(chat_id, "Пожалуйста, выберите магазин из меню.", reply_markup=get_shop_menu())
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('staff_'))
 def handle_staff_callback(call):
@@ -731,7 +743,7 @@ def handle_any_message(message):
 
     if text == "📦 Прием поставки":
         user["stage"] = "choose_shop_delivery"
-        bot.send_message(chat_id, "Выберите магазин для приемки поставки:", reply_markup=get_shop_menu())
+        bot.send_message(chat_id, "Выберите магазин для приемки поставки:", reply_markup=get_shop_menu(include_back=True))
         return
 
     if text == "❌ Отменить":
