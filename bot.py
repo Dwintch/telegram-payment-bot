@@ -222,6 +222,16 @@ def deduplicate_order_items(items):
             unique_items.append(item)
     return unique_items
 
+def is_photo_related_item(item):
+    """Check if item contains photo-related keywords that should not go to delivery"""
+    item_lower = item.lower().strip()
+    photo_keywords = ["фото", "прикрепил фото"]
+    return any(keyword in item_lower for keyword in photo_keywords)
+
+def filter_photo_items(items):
+    """Filter out photo-related items from list"""
+    return [item for item in items if not is_photo_related_item(item)]
+
 def merge_order(chat_id, new_items):
     """Merge new items with current session order items"""
     user = user_data.get(chat_id)
@@ -392,9 +402,11 @@ def choose_shop(message):
             user["delivery_message_id"] = None
             
             # Step 1: Start with pending delivery items (leftovers from previous deliveries)
-            # ИСПОЛЬЗУЕМ ГЛОБАЛЬНЫЕ ДАННЫЕ МАГАЗИНА
+            # ИСПОЛЬЗУЕМ ГЛОБАЛЬНЫЕ ДАННЫЕ МАГАЗИНА, НО ИСКЛЮЧАЕМ ФОТО-ПОЗИЦИИ
             shop_info = shop_data[shop]
-            leftovers = shop_info["pending_delivery"].copy()
+            all_leftovers = shop_info["pending_delivery"].copy()
+            # Filter out photo-related items from leftovers as they shouldn't be in pending_delivery anyway
+            leftovers = filter_photo_items(all_leftovers) if all_leftovers else []
             combined_items = leftovers.copy() if leftovers else []
             
             # Step 2: Check if there's an existing last_order for this shop and merge it
@@ -455,6 +467,15 @@ def choose_shop(message):
                 bot.send_message(chat_id, current_order_text)
             else:
                 shop_msg += "📝 Введите товары через запятую или с новой строки:"
+            
+            # Always send help text for order creation
+            help_text = (
+                "ℹ️ <b>Справка по созданию заказа:</b>\n"
+                "• Товары пишутся через запятую или с новой строки\n"
+                "• Если товар сложно описать, в сообщении можно написать \"фото\" или \"прикрепил фото\" — бот прикрепит фото к позиции\n"
+                "• Фото/видео для уточнения НЕ попадут в приемку/поставки"
+            )
+            bot.send_message(chat_id, help_text)
             
             # Always send the shop selection message and menu
             bot.send_message(chat_id, shop_msg, reply_markup=get_order_action_menu())
@@ -570,6 +591,15 @@ def handle_delivery_callback(call):
         
         final_report = "\n".join(report_lines)
         bot.send_message(CHAT_ID_FOR_REPORT, final_report, message_thread_id=THREAD_ID_FOR_ORDER)
+        
+        # Delete old order message after delivery acceptance is completed
+        if shop in shop_order_messages:
+            try:
+                old_message_data = shop_order_messages[shop]
+                bot.delete_message(CHAT_ID_FOR_REPORT, old_message_data["message_id"])
+                del shop_order_messages[shop]  # Remove from tracking
+            except Exception as e:
+                print(f"Ошибка удаления старого сообщения заказа после приемки: {e}")
         
         if not_arrived:
             bot.send_message(chat_id, "❌ Товары, которые не приехали, будут автоматически добавлены в следующий заказ.", reply_markup=get_main_menu())
@@ -958,10 +988,10 @@ def send_order(chat_id, appended=False):
     # СОХРАНЯЕМ ЗАКАЗ В ГЛОБАЛЬНЫХ ДАННЫХ МАГАЗИНА
     shop_data[shop]["last_order"] = items.copy()
     
-    # ВАЖНО: Обновляем pending_delivery только новыми позициями
-    # Исключаем уже принятые товары из pending_delivery
+    # ВАЖНО: Обновляем pending_delivery только новыми позициями, ИСКЛЮЧАЯ фото-позиции
+    # Исключаем уже принятые товары из pending_delivery и фото-позиции
     accepted_items = shop_data[shop]["accepted_delivery"]
-    new_pending_items = [item for item in items if item not in accepted_items]
+    new_pending_items = [item for item in items if item not in accepted_items and not is_photo_related_item(item)]
     shop_data[shop]["pending_delivery"] = new_pending_items
 
 print("✅ Бот запущен...")
