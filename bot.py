@@ -506,7 +506,8 @@ def start(message):
         "original_order_count": 0,  # Количество позиций до объединения (временно)
         "saved_order": [],  # Локально сохраненный заказ пользователя
         "selected_for_removal": [],  # Позиции выбранные для удаления
-        "popular_items_list": []  # Список популярных товаров для текущей сессии
+        "popular_items_list": [],  # Список популярных товаров для текущей сессии
+        "temp_shop": None  # Временное хранилище магазина для популярных товаров после отправки заказа
     }
     bot.send_message(chat_id, "Привет! Выберите магазин для переводов:", reply_markup=get_shop_menu())
 
@@ -541,7 +542,8 @@ def choose_shop(message):
             "original_order_count": 0,
             "saved_order": [],
             "selected_for_removal": [],
-            "popular_items_list": []
+            "popular_items_list": [],
+            "temp_shop": None
         })
         bot.send_message(chat_id, f"Выбран магазин: <b>{message.text}</b>", reply_markup=get_main_menu())
         return
@@ -767,27 +769,41 @@ def choose_shop(message):
 def handle_popular_items_callback(call):
     chat_id = call.message.chat.id
     user = user_data.get(chat_id)
-    if not user or user.get('stage') != 'popular_items':
+    current_stage = user.get('stage') if user else None
+    
+    if not user or current_stage not in ['popular_items', 'popular_after_order']:
         bot.answer_callback_query(call.id, "❌ Сессия истекла")
         return
 
     if call.data == 'popular_skip':
-        # Пропустить популярные товары
-        user['stage'] = 'order_input'
-        bot.edit_message_text(
-            "➡️ Популярные товары пропущены. Вводите позиции заказа:",
-            chat_id, 
-            call.message.message_id
-        )
-        bot.send_message(chat_id, 
-            "📖 Информационная справка:\n"
-            "• Пишите позиции заказа через запятую или с новой строки (можно отдельными сообщениями)\n"
-            "• Чтобы добавить фото — сначала текст, потом фото, потом отправка заказа\n"
-            "• Фото/видео для уточнения НЕ попадут в приёмку поставки",
-            reply_markup=get_order_action_menu()
-        )
-        bot.answer_callback_query(call.id)
-        return
+        if current_stage == 'popular_after_order':
+            # Пропустить популярные товары после отправки заказа - вернуться в главное меню
+            user['stage'] = 'main'
+            user['temp_shop'] = None
+            bot.edit_message_text(
+                "➡️ Популярные товары пропущены. Возвращаемся в главное меню.",
+                chat_id, 
+                call.message.message_id
+            )
+            bot.answer_callback_query(call.id)
+            return
+        else:
+            # Обычная логика для popular_items
+            user['stage'] = 'order_input'
+            bot.edit_message_text(
+                "➡️ Популярные товары пропущены. Вводите позиции заказа:",
+                chat_id, 
+                call.message.message_id
+            )
+            bot.send_message(chat_id, 
+                "📖 Информационная справка:\n"
+                "• Пишите позиции заказа через запятую или с новой строки (можно отдельными сообщениями)\n"
+                "• Чтобы добавить фото — сначала текст, потом фото, потом отправка заказа\n"
+                "• Фото/видео для уточнения НЕ попадут в приёмку поставки",
+                reply_markup=get_order_action_menu()
+            )
+            bot.answer_callback_query(call.id)
+            return
     
     if call.data.startswith('popular_'):
         try:
@@ -797,23 +813,46 @@ def handle_popular_items_callback(call):
             if 0 <= item_index < len(popular_items):
                 selected_item = popular_items[item_index]
                 
-                # Добавляем товар к заказу
-                if selected_item not in user.get('order_items', []):
+                if current_stage == 'popular_after_order':
+                    # Быстрое создание нового заказа после отправки предыдущего
                     user.setdefault('order_items', []).append(selected_item)
+                    user['order_shop'] = user.get('temp_shop')  # Используем сохраненный магазин
+                    user['stage'] = 'order_input'
+                    user['temp_shop'] = None  # Очищаем временный магазин
                     
-                    bot.answer_callback_query(call.id, f"✅ Добавлено: {selected_item}")
+                    bot.answer_callback_query(call.id, f"✅ Создан новый заказ с товаром: {selected_item}")
                     
-                    # Обновляем сообщение с информацией о добавлении
                     order_text = format_order_list(user['order_items'])
                     bot.edit_message_text(
-                        f"✅ Товар «{selected_item}» добавлен в заказ!\n\n{order_text}\n\n"
-                        "Выберите еще товары или пропустите:",
+                        f"🆕 Создан новый заказ для магазина «{user['order_shop']}»!\n\n"
+                        f"{order_text}\n\n"
+                        f"Продолжайте добавлять товары или отправляйте заказ:",
                         chat_id,
-                        call.message.message_id,
-                        reply_markup=call.message.reply_markup
+                        call.message.message_id
                     )
+                    
+                    # Показываем меню действий с заказом
+                    bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
+                    return
+                    
                 else:
-                    bot.answer_callback_query(call.id, f"⚠️ {selected_item} уже в заказе")
+                    # Обычная логика добавления товара в существующий заказ
+                    if selected_item not in user.get('order_items', []):
+                        user.setdefault('order_items', []).append(selected_item)
+                        
+                        bot.answer_callback_query(call.id, f"✅ Добавлено: {selected_item}")
+                        
+                        # Обновляем сообщение с информацией о добавлении
+                        order_text = format_order_list(user['order_items'])
+                        bot.edit_message_text(
+                            f"✅ Товар «{selected_item}» добавлен в заказ!\n\n{order_text}\n\n"
+                            "Выберите еще товары или пропустите:",
+                            chat_id,
+                            call.message.message_id,
+                            reply_markup=call.message.reply_markup
+                        )
+                    else:
+                        bot.answer_callback_query(call.id, f"⚠️ {selected_item} уже в заказе")
                     
         except (ValueError, IndexError):
             bot.answer_callback_query(call.id, "❌ Ошибка выбора товара")
@@ -1086,6 +1125,12 @@ def handle_any_message(message):
                     bot.send_message(chat_id, "⚠️ Заказ пуст, нечего отправлять.")
                     return
                 
+                # Добавляем подтверждающую реакцию на сообщение пользователя
+                try:
+                    bot.set_message_reaction(chat_id, message.message_id, [types.ReactionTypeEmoji("✅")])
+                except Exception as e:
+                    print(f"Не удалось добавить реакцию: {e}")
+                
                 # Трекинг популярности товаров при отправке заказа
                 for item in user["order_items"]:
                     track_order_item(item)
@@ -1097,6 +1142,7 @@ def handle_any_message(message):
                 # Reset order state
                 user["saved_order"] = []
                 user["order_items"] = []
+                shop_for_popular = user["order_shop"]  # Сохраняем магазин для популярной клавиатуры
                 user["order_shop"] = None
                 user["order_photos"] = []
                 user["order_videos"] = []
@@ -1106,6 +1152,23 @@ def handle_any_message(message):
                 
                 success_msg = "✅ Заказ дополнен и отправлен!" if is_appended else "✅ Заказ отправлен!"
                 bot.send_message(chat_id, success_msg, reply_markup=get_main_menu())
+                
+                # Показываем инлайн-клавиатуру с популярными товарами для быстрого создания нового заказа
+                popular_keyboard_data = get_popular_items_keyboard()
+                if popular_keyboard_data:
+                    markup, popular_items = popular_keyboard_data
+                    user["popular_items_list"] = popular_items
+                    user["stage"] = "popular_after_order"
+                    user["temp_shop"] = shop_for_popular  # Временно сохраняем магазин
+                    
+                    popular_msg = (
+                        f"🚀 Заказ успешно отправлен!\n\n"
+                        f"⭐ Хотите быстро создать новый заказ?\n"
+                        f"Топ-15 популярных позиций за неделю для магазина «{shop_for_popular}»:"
+                    )
+                    
+                    bot.send_message(chat_id, popular_msg, reply_markup=markup)
+                
                 return
 
             if text == "🗑 Удалить из заказа":
