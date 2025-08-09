@@ -119,6 +119,24 @@ def weather_monitor_thread():
 weather_thread = threading.Thread(target=weather_monitor_thread, daemon=True)
 weather_thread.start()
 
+def get_weather_condition_emoji(weather_main, weather_desc):
+    """Get weather emoji based on weather condition"""
+    weather_main_lower = weather_main.lower()
+    weather_desc_lower = weather_desc.lower()
+    
+    if "rain" in weather_main_lower or "дождь" in weather_desc_lower:
+        return "🌧️ Дождь"
+    elif "cloud" in weather_main_lower or "облач" in weather_desc_lower or "пасмурн" in weather_desc_lower:
+        return "🌥️ Пасмурно"
+    elif "clear" in weather_main_lower or "ясн" in weather_desc_lower:
+        return "☀️ Ясно"
+    elif "snow" in weather_main_lower or "снег" in weather_desc_lower:
+        return "❄️ Снег"
+    elif "fog" in weather_main_lower or "mist" in weather_main_lower or "туман" in weather_desc_lower:
+        return "🌫️ Туман"
+    else:
+        return f"🌤️ {weather_desc.capitalize()}"
+
 def get_weather_report():
     if not os.path.exists(WEATHER_LOG_FILE):
         return "Нет данных по погоде за сегодня."
@@ -136,14 +154,26 @@ def get_weather_report():
     # Вместо средней температуры — максимальная (пиковая)
     max_temp = round(max(temps), 1)
     avg_wind = round(sum(wind_speeds) / len(wind_speeds), 1)
-    rain_was = "да" if rain_total > 0 else "нет"
+    
+    # Get weather condition with emoji from the latest entry
+    latest_entry = today_log[-1]
+    weather_condition = get_weather_condition_emoji(latest_entry["weather"], latest_entry["weather_desc"])
+    
     report = (
         f"<b>Погодный отчёт за сегодня:</b>\n"
+        f"{weather_condition}\n"
         f"Пиковая температура: <b>{max_temp}°C</b>\n"
-        f"Дождь был: <b>{rain_was}</b>\n"
-        f"Дождь (время): <b>{rain_hours:.2f} ч</b>, всего выпало <b>{rain_total:.2f} мм</b>\n"
-        f"Средний ветер: <b>{avg_wind} м/с</b>"
     )
+    
+    # Only show rain information if there was rain
+    if rain_total > 0:
+        rain_was = "да"
+        report += (
+            f"Дождь был: <b>{rain_was}</b>\n"
+            f"Дождь (время): <b>{rain_hours:.2f} ч</b>, всего выпало <b>{rain_total:.2f} мм</b>\n"
+        )
+    
+    report += f"Средний ветер: <b>{avg_wind} м/с</b>"
     return report
 
 # === КНОПКИ ===
@@ -431,54 +461,30 @@ def choose_shop(message):
             user["original_order_count"] = len(combined_items)
             user["stage"] = "order_input"
             
-            # Step 5: Always send shop selection confirmation message
-            shop_msg = f"🛒 Выбран магазин для заказа: <b>{shop}</b>\n"
+            # Step 5: Create one consolidated message with all information
+            consolidated_msg = f"🛒 Выбран магазин для заказа: «{shop}»\n"
             
-            # Step 6: Prepare consolidated info message if there are existing items
+            # Step 6: Add order information if there are existing items
             if leftovers or filtered_existing_items:
-                info_parts = []
+                consolidated_msg += "ℹ️ Информация о заказе:\n"
+                consolidated_msg += "С прошлого заказа не приехали следующие позиции:\n"
                 
-                if leftovers and filtered_existing_items:
-                    info_parts.append(f"📦 Добавлено из прошлой поставки: {len(leftovers)} поз.")
-                    info_parts.append(f"🔄 Объединено из существующего заказа: {len(filtered_existing_items)} поз.")
-                elif leftovers:
-                    info_parts.append(f"📦 Автоматически добавлены товары из прошлой поставки ({len(leftovers)} поз.)")
-                elif filtered_existing_items:
-                    info_parts.append(f"🔄 Объединены товары из существующего заказа ({len(filtered_existing_items)} поз.)")
+                # List all carried over items as bullet points
+                for item in combined_items:
+                    consolidated_msg += f"- {item}\n"
                 
-                total_before_dedup = len(leftovers) + len(filtered_existing_items)
-                duplicates_removed = total_before_dedup - total_combined
-                
-                if duplicates_removed > 0:
-                    info_parts.append(f"🗑️ Удалено дублей: {duplicates_removed}")
-                
-                if accepted_items:
-                    info_parts.append(f"✅ Исключено уже принятых товаров: {len(accepted_items)} поз.")
-                
-                info_parts.append(f"📊 Итого позиций в заказе: {total_combined}")
-                
-                consolidated_message = f"ℹ️ <b>Информация о заказе:</b>\n" + "\n".join(f"• {part}" for part in info_parts)
-                bot.send_message(chat_id, consolidated_message)
-                
-                shop_msg += f"📝 Текущий заказ содержит {total_combined} позиций. Можете дополнить заказ или отправить его:"
-                
-                # Show current order
-                current_order_text = format_order_list(user["order_items"], show_appended_info=user.get("order_is_appended", False), original_count=user.get("original_order_count", 0))
-                bot.send_message(chat_id, current_order_text)
-            else:
-                shop_msg += "📝 Введите товары через запятую или с новой строки:"
+                consolidated_msg += "\n"
             
-            # Always send help text for order creation
-            help_text = (
-                "ℹ️ <b>Справка по созданию заказа:</b>\n"
-                "• Товары пишутся через запятую или с новой строки\n"
-                "• Если товар сложно описать, в сообщении можно написать \"фото\" или \"прикрепил фото\" — бот прикрепит фото к позиции\n"
-                "• Фото/видео для уточнения НЕ попадут в приемку/поставки"
+            # Add information guide
+            consolidated_msg += (
+                "📖 Информационная справка:\n"
+                "• Пишите позиции заказа через запятую или с новой строки (можно отдельными сообщениями)\n"
+                "• Чтобы добавить фото — сначала текст, потом фото, потом отправка заказа\n"
+                "• Фото/видео для уточнения НЕ попадут в приёмку поставки"
             )
-            bot.send_message(chat_id, help_text)
             
-            # Always send the shop selection message and menu
-            bot.send_message(chat_id, shop_msg, reply_markup=get_order_action_menu())
+            # Send the consolidated message
+            bot.send_message(chat_id, consolidated_msg, reply_markup=get_order_action_menu())
             return
 
     if user.get("stage") == "choose_shop_delivery":
@@ -966,9 +972,6 @@ def send_order(chat_id, appended=False):
         order_text += f"➕ Перенесено из прошлого заказа: {original_count} позиций\n"
         if new_items_count > 0:
             order_text += f"🆕 Добавлено новых позиций: {new_items_count}\n"
-    
-    # Справка по заполнению
-    order_text += "ℹ️ Пиши заказ через запятую или с новой строки, фото можно приложить для уточнения\n\n"
     
     # Список заказа с эмодзи
     order_text += "📦 Заказ:\n"
