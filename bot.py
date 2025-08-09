@@ -54,6 +54,10 @@ shop_data = {
 # === ХРАНИЛИЩЕ MESSAGE_ID ЗАКАЗОВ ПО МАГАЗИНАМ ===
 shop_order_messages = {}  # {shop_name: {"message_id": int, "photos": [], "videos": []}}
 
+# === СТАТИСТИКА ПОПУЛЯРНЫХ ТОВАРОВ ===
+# Хранилище статистики заказанных товаров {item_name: [timestamps]}
+item_statistics = {}
+
 # === СПИСОК СОТРУДНИКОВ ===
 STAFF_LIST = ["Данил", "Даниз", "Даша", "Соня", "Оксана", "Лиза"]
 
@@ -199,7 +203,7 @@ def get_confirm_menu():
 
 def get_order_action_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("✅ Отправить заказ", "✏️ Изменить заказ")
+    markup.add("✅ Отправить заказ", "🗑 Удалить из заказа")
     markup.add("💾 Сохранить заказ (не отправлять)", "❌ Отмена")
     return markup
 
@@ -233,6 +237,26 @@ def get_delivery_keyboard(pending_items, arrived_items=None):
         markup.add(types.InlineKeyboardButton(text, callback_data=callback_data))
     
     markup.add(types.InlineKeyboardButton("📦 Отправить приёмку", callback_data="delivery_submit"))
+    return markup
+
+def get_order_removal_keyboard(order_items, selected_for_removal=None):
+    """Создать инлайн-клавиатуру для удаления позиций из заказа"""
+    selected_for_removal = selected_for_removal or []
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    
+    for i, item in enumerate(order_items):
+        status = "🗑" if item in selected_for_removal else "📦"
+        text = f"{status} {item}"
+        callback_data = f"remove_toggle_{i}"
+        markup.add(types.InlineKeyboardButton(text, callback_data=callback_data))
+    
+    # Кнопки управления
+    control_row = []
+    control_row.append(types.InlineKeyboardButton("✅ Принять", callback_data="remove_accept"))
+    control_row.append(types.InlineKeyboardButton("🗑 Удалить все", callback_data="remove_all"))
+    markup.add(*control_row)
+    markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="remove_back"))
+    
     return markup
 
 def sanitize_input(text):
@@ -374,6 +398,59 @@ def round_to_50(value):
     else:
         return int(value + (50 - remainder))
 
+def track_order_item(item):
+    """Добавить товар в статистику заказов"""
+    current_time = datetime.now().isoformat()
+    item_clean = item.strip().lower()
+    if item_clean not in item_statistics:
+        item_statistics[item_clean] = []
+    item_statistics[item_clean].append(current_time)
+
+def get_popular_items(limit=15):
+    """Получить топ популярных товаров за последнюю неделю"""
+    from datetime import timedelta
+    
+    week_ago = datetime.now() - timedelta(days=7)
+    popular_items = {}
+    
+    for item, timestamps in item_statistics.items():
+        # Считаем только заказы за последнюю неделю
+        recent_orders = [
+            t for t in timestamps 
+            if datetime.fromisoformat(t) >= week_ago
+        ]
+        if recent_orders:
+            popular_items[item] = len(recent_orders)
+    
+    # Сортируем по популярности и берем топ-15
+    sorted_items = sorted(popular_items.items(), key=lambda x: x[1], reverse=True)
+    return [item[0] for item in sorted_items[:limit]]
+
+def get_popular_items_keyboard():
+    """Создать инлайн-клавиатуру с популярными товарами"""
+    popular_items = get_popular_items()
+    if not popular_items:
+        return None
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    
+    for i, item in enumerate(popular_items):
+        # Ограничиваем длину текста кнопки для лучшего отображения
+        button_text = item[:25] + "..." if len(item) > 25 else item
+        callback_data = f"popular_{i}"
+        buttons.append(types.InlineKeyboardButton(button_text, callback_data=callback_data))
+    
+    # Добавляем кнопки по 2 в ряд
+    for i in range(0, len(buttons), 2):
+        if i + 1 < len(buttons):
+            markup.add(buttons[i], buttons[i + 1])
+        else:
+            markup.add(buttons[i])
+    
+    markup.add(types.InlineKeyboardButton("➡️ Пропустить", callback_data="popular_skip"))
+    return markup, popular_items
+
 @bot.message_handler(content_types=['photo', 'video'])
 def handle_media(message):
     chat_id = message.chat.id
@@ -427,7 +504,9 @@ def start(message):
         "selected_staff": [],  # Выбранные сотрудники для отчета
         "order_is_appended": False,  # Флаг объединения заказа (временный)
         "original_order_count": 0,  # Количество позиций до объединения (временно)
-        "saved_order": []  # Локально сохраненный заказ пользователя
+        "saved_order": [],  # Локально сохраненный заказ пользователя
+        "selected_for_removal": [],  # Позиции выбранные для удаления
+        "popular_items_list": []  # Список популярных товаров для текущей сессии
     }
     bot.send_message(chat_id, "Привет! Выберите магазин для переводов:", reply_markup=get_shop_menu())
 
@@ -460,7 +539,9 @@ def choose_shop(message):
             "selected_staff": [],
             "order_is_appended": False,
             "original_order_count": 0,
-            "saved_order": []
+            "saved_order": [],
+            "selected_for_removal": [],
+            "popular_items_list": []
         })
         bot.send_message(chat_id, f"Выбран магазин: <b>{message.text}</b>", reply_markup=get_main_menu())
         return
@@ -501,11 +582,29 @@ def choose_shop(message):
             combined_items = deduplicate_order_items(combined_items)
             total_combined = len(combined_items)
             
-            # Step 4: Set up order state
+            # Step 5: Set up order state
             user["order_items"] = combined_items
             user["order_is_appended"] = len(combined_items) > 0
             user["original_order_count"] = len(combined_items)
-            user["stage"] = "order_input"
+            
+            # Step 6: Show popular items if available, otherwise go to order input
+            popular_keyboard_data = get_popular_items_keyboard()
+            if popular_keyboard_data and not combined_items:
+                # Показываем популярные товары только если заказ пуст
+                markup, popular_items = popular_keyboard_data
+                user["popular_items_list"] = popular_items
+                user["stage"] = "popular_items"
+                
+                popular_msg = (
+                    f"🛒 Выбран магазин для заказа: «{shop}»\n\n"
+                    f"⭐ Топ-15 популярных позиций за неделю:\n"
+                    f"Выберите товары для быстрого добавления в заказ:"
+                )
+                
+                bot.send_message(chat_id, popular_msg, reply_markup=markup)
+                return
+            else:
+                user["stage"] = "order_input"
             
             # Step 5: Create one consolidated message with all information
             consolidated_msg = f"🛒 Выбран магазин для заказа: «{shop}»\n"
@@ -570,7 +669,25 @@ def choose_shop(message):
             user["order_items"] = combined_items
             user["order_is_appended"] = len(combined_items) > len(saved_items)
             user["original_order_count"] = len(combined_items)
-            user["stage"] = "order_input"
+            
+            # Step 6: Check if we should show popular items
+            popular_keyboard_data = get_popular_items_keyboard()
+            if popular_keyboard_data and not combined_items:
+                # Показываем популярные товары только если заказ пуст (что маловероятно с saved_order)
+                markup, popular_items = popular_keyboard_data
+                user["popular_items_list"] = popular_items
+                user["stage"] = "popular_items"
+                
+                popular_msg = (
+                    f"🛒 Выбран магазин для заказа: «{shop}»\n\n"
+                    f"⭐ Топ-15 популярных позиций за неделю:\n"
+                    f"Выберите товары для быстрого добавления в заказ:"
+                )
+                
+                bot.send_message(chat_id, popular_msg, reply_markup=markup)
+                return
+            else:
+                user["stage"] = "order_input"
             
             # Step 6: Create consolidated message
             consolidated_msg = f"🛒 Выбран магазин для заказа: «{shop}»\n"
@@ -646,7 +763,163 @@ def choose_shop(message):
     else:
         bot.send_message(chat_id, "Пожалуйста, выберите магазин из меню.", reply_markup=get_shop_menu())
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('staff_'))
+@bot.callback_query_handler(func=lambda call: call.data.startswith('popular_'))
+def handle_popular_items_callback(call):
+    chat_id = call.message.chat.id
+    user = user_data.get(chat_id)
+    if not user or user.get('stage') != 'popular_items':
+        bot.answer_callback_query(call.id, "❌ Сессия истекла")
+        return
+
+    if call.data == 'popular_skip':
+        # Пропустить популярные товары
+        user['stage'] = 'order_input'
+        bot.edit_message_text(
+            "➡️ Популярные товары пропущены. Вводите позиции заказа:",
+            chat_id, 
+            call.message.message_id
+        )
+        bot.send_message(chat_id, 
+            "📖 Информационная справка:\n"
+            "• Пишите позиции заказа через запятую или с новой строки (можно отдельными сообщениями)\n"
+            "• Чтобы добавить фото — сначала текст, потом фото, потом отправка заказа\n"
+            "• Фото/видео для уточнения НЕ попадут в приёмку поставки",
+            reply_markup=get_order_action_menu()
+        )
+        bot.answer_callback_query(call.id)
+        return
+    
+    if call.data.startswith('popular_'):
+        try:
+            item_index = int(call.data.replace('popular_', ''))
+            popular_items = user.get('popular_items_list', [])
+            
+            if 0 <= item_index < len(popular_items):
+                selected_item = popular_items[item_index]
+                
+                # Добавляем товар к заказу
+                if selected_item not in user.get('order_items', []):
+                    user.setdefault('order_items', []).append(selected_item)
+                    
+                    bot.answer_callback_query(call.id, f"✅ Добавлено: {selected_item}")
+                    
+                    # Обновляем сообщение с информацией о добавлении
+                    order_text = format_order_list(user['order_items'])
+                    bot.edit_message_text(
+                        f"✅ Товар «{selected_item}» добавлен в заказ!\n\n{order_text}\n\n"
+                        "Выберите еще товары или пропустите:",
+                        chat_id,
+                        call.message.message_id,
+                        reply_markup=call.message.reply_markup
+                    )
+                else:
+                    bot.answer_callback_query(call.id, f"⚠️ {selected_item} уже в заказе")
+                    
+        except (ValueError, IndexError):
+            bot.answer_callback_query(call.id, "❌ Ошибка выбора товара")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('remove_'))
+def handle_order_removal_callback(call):
+    chat_id = call.message.chat.id
+    user = user_data.get(chat_id)
+    if not user or user.get('stage') != 'order_removal':
+        bot.answer_callback_query(call.id, "❌ Сессия истекла")
+        return
+
+    order_items = user.get('order_items', [])
+    selected_for_removal = user.get('selected_for_removal', [])
+
+    if call.data == 'remove_accept':
+        # Принять изменения - удалить выбранные товары
+        remaining_items = [item for item in order_items if item not in selected_for_removal]
+        user['order_items'] = remaining_items
+        user['selected_for_removal'] = []
+        user['stage'] = 'order_input'
+        
+        removed_count = len(order_items) - len(remaining_items)
+        if removed_count > 0:
+            success_msg = f"✅ Удалено позиций: {removed_count}\n\n"
+        else:
+            success_msg = "ℹ️ Позиции для удаления не были выбраны.\n\n"
+            
+        order_text = format_order_list(remaining_items)
+        bot.edit_message_text(
+            success_msg + order_text,
+            chat_id,
+            call.message.message_id
+        )
+        bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
+        bot.answer_callback_query(call.id, "✅ Изменения приняты")
+        return
+
+    elif call.data == 'remove_all':
+        # Удалить все товары из заказа
+        user['order_items'] = []
+        user['selected_for_removal'] = []
+        user['stage'] = 'order_input'
+        
+        bot.edit_message_text(
+            "🗑️ Заказ полностью очищен.\n\n📋 Заказ пуст.",
+            chat_id,
+            call.message.message_id
+        )
+        bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
+        bot.answer_callback_query(call.id, "🗑️ Заказ очищен")
+        return
+
+    elif call.data == 'remove_back':
+        # Назад без изменений
+        user['selected_for_removal'] = []
+        user['stage'] = 'order_input'
+        
+        order_text = format_order_list(order_items)
+        bot.edit_message_text(
+            f"⬅️ Возврат без изменений.\n\n{order_text}",
+            chat_id,
+            call.message.message_id
+        )
+        bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
+        bot.answer_callback_query(call.id, "⬅️ Возврат")
+        return
+
+    elif call.data.startswith('remove_toggle_'):
+        # Переключить выбор товара для удаления
+        try:
+            item_index = int(call.data.replace('remove_toggle_', ''))
+            if 0 <= item_index < len(order_items):
+                item = order_items[item_index]
+                
+                if item in selected_for_removal:
+                    selected_for_removal.remove(item)
+                else:
+                    selected_for_removal.append(item)
+                
+                user['selected_for_removal'] = selected_for_removal
+                
+                # Обновляем клавиатуру
+                new_markup = get_order_removal_keyboard(order_items, selected_for_removal)
+                
+                # Обновляем текст сообщения
+                selected_count = len(selected_for_removal)
+                message_text = (
+                    f"🗑 Удаление из заказа\n\n"
+                    f"Выбрано для удаления: {selected_count} позиций\n"
+                    f"📦 = оставить, 🗑 = удалить\n\n"
+                    f"Нажмите на позиции, которые хотите удалить:"
+                )
+                
+                bot.edit_message_text(
+                    message_text,
+                    chat_id,
+                    call.message.message_id,
+                    reply_markup=new_markup
+                )
+                
+        except (ValueError, IndexError):
+            bot.answer_callback_query(call.id, "❌ Ошибка")
+            return
+        
+        bot.answer_callback_query(call.id)
 def handle_staff_callback(call):
     chat_id = call.message.chat.id
     user = user_data.get(chat_id)
@@ -807,11 +1080,15 @@ def handle_any_message(message):
 
     # Order handling
     if user["stage"] == "order_input":
-        if text in ["✅ Отправить заказ", "✏️ Изменить заказ", "💾 Сохранить заказ (не отправлять)", "❌ Отмена"]:
+        if text in ["✅ Отправить заказ", "🗑 Удалить из заказа", "💾 Сохранить заказ (не отправлять)", "❌ Отмена"]:
             if text == "✅ Отправить заказ":
                 if not user["order_items"]:
                     bot.send_message(chat_id, "⚠️ Заказ пуст, нечего отправлять.")
                     return
+                
+                # Трекинг популярности товаров при отправке заказа
+                for item in user["order_items"]:
+                    track_order_item(item)
                 
                 # Check if this is an appended order
                 is_appended = user.get("order_is_appended", False)
@@ -831,12 +1108,24 @@ def handle_any_message(message):
                 bot.send_message(chat_id, success_msg, reply_markup=get_main_menu())
                 return
 
-            if text == "✏️ Изменить заказ":
+            if text == "🗑 Удалить из заказа":
                 if not user["order_items"]:
-                    bot.send_message(chat_id, "⚠️ Заказ пуст, нечего изменять.")
+                    bot.send_message(chat_id, "⚠️ Заказ пуст, нечего удалять.")
                     return
-                bot.send_message(chat_id, "✏️ Напишите позиции, которые хотите удалить через запятую или с новой строки.\nЕсли хотите очистить весь заказ — напишите 'удалить всё', 'очистить', 'сбросить'.")
-                user["stage"] = "order_edit"
+                
+                # Переход в режим интерактивного удаления
+                user["stage"] = "order_removal"
+                user["selected_for_removal"] = []
+                
+                removal_msg = (
+                    f"🗑 Удаление из заказа\n\n"
+                    f"Выбрано для удаления: 0 позиций\n"
+                    f"📦 = оставить, 🗑 = удалить\n\n"
+                    f"Нажмите на позиции, которые хотите удалить:"
+                )
+                
+                removal_keyboard = get_order_removal_keyboard(user["order_items"])
+                bot.send_message(chat_id, removal_msg, reply_markup=removal_keyboard)
                 return
 
             if text == "💾 Сохранить заказ (не отправлять)":
@@ -864,44 +1153,35 @@ def handle_any_message(message):
                 user["stage"] = "main"
                 bot.send_message(chat_id, "❌ Действие отменено.", reply_markup=get_main_menu())
                 return
-        else:
-            items = sanitize_input(text)
-            if items:
-                # Use merge_order function instead of simple addition
-                user["order_items"] = merge_order(chat_id, items)
-                
-                # Show enhanced order information if this is an appended order
-                is_appended = user.get("order_is_appended", False)
-                original_count = user.get("original_order_count", 0)
-                order_text = format_order_list(user["order_items"], show_appended_info=is_appended, original_count=original_count)
-                bot.send_message(chat_id, order_text)
-                bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
             else:
-                bot.send_message(chat_id, "⚠️ Введите товары через запятую или с новой строки.")
+                items = sanitize_input(text)
+                if items:
+                    # Use merge_order function instead of simple addition
+                    user["order_items"] = merge_order(chat_id, items)
+                    
+                    # Show enhanced order information if this is an appended order
+                    is_appended = user.get("order_is_appended", False)
+                    original_count = user.get("original_order_count", 0)
+                    order_text = format_order_list(user["order_items"], show_appended_info=is_appended, original_count=original_count)
+                    bot.send_message(chat_id, order_text)
+                    bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
+                else:
+                    bot.send_message(chat_id, "⚠️ Введите товары через запятую или с новой строки.")
         return
 
-    if user["stage"] == "order_edit":
-        text_lower = text.lower()
-        if any(word in text_lower for word in ["удалить всё", "удалить все", "очистить", "сбросить"]):
-            user["order_items"] = []
-            bot.send_message(chat_id, "🗑️ Заказ очищен.")
-        else:
-            to_delete = sanitize_input(text)
-            initial_len = len(user["order_items"])
-            remaining = []
-            for order_item in user["order_items"]:
-                if not any(order_item.lower() == del_item.lower() for del_item in to_delete):
-                    remaining.append(order_item)
-            deleted_count = initial_len - len(remaining)
-            user["order_items"] = remaining
-            if deleted_count:
-                bot.send_message(chat_id, f"Удалено позиций: {deleted_count}")
-            else:
-                bot.send_message(chat_id, "⚠️ Не найдено позиций для удаления.")
-        order_text = format_order_list(user["order_items"], show_appended_info=user.get("order_is_appended", False), original_count=user.get("original_order_count", 0))
-        bot.send_message(chat_id, order_text)
-        bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
-        user["stage"] = "order_input"
+    # Обработка ввода товаров когда пользователь находится в стадии популярных товаров  
+    if user["stage"] == "popular_items":
+        # Если пользователь ввел текст во время выбора популярных товаров,
+        # переходим к обычному вводу заказа
+        items = sanitize_input(text)
+        if items:
+            user["order_items"].extend(items)
+            user["order_items"] = deduplicate_order_items(user["order_items"])
+            user["stage"] = "order_input"
+            
+            order_text = format_order_list(user["order_items"])
+            bot.send_message(chat_id, f"✅ Товары добавлены к заказу!\n\n{order_text}")
+            bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
         return
 
     if text == "📦 Прием поставки":
