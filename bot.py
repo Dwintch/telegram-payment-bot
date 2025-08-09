@@ -1131,18 +1131,29 @@ def handle_any_message(message):
                 except Exception as e:
                     print(f"Не удалось добавить реакцию: {e}")
                 
+                # Мгновенная обратная связь - подтверждение принятия заказа
+                is_appended = user.get("order_is_appended", False)
+                shop_for_popular = user["order_shop"]
+                order_count = len(user["order_items"])
+                
+                instant_confirmation = (
+                    f"✅ **Заказ принят!**\n\n"
+                    f"🏪 Магазин: **{shop_for_popular}**\n"
+                    f"📦 Позиций в заказе: **{order_count}**\n"
+                    f"🚀 Заказ {'дополнен и ' if is_appended else ''}отправляется..."
+                )
+                bot.send_message(chat_id, instant_confirmation, parse_mode='Markdown')
+                
                 # Трекинг популярности товаров при отправке заказа
                 for item in user["order_items"]:
                     track_order_item(item)
                 
-                # Check if this is an appended order
-                is_appended = user.get("order_is_appended", False)
+                # Отправляем заказ в группу
                 send_order(chat_id, appended=is_appended)
                 
                 # Reset order state
                 user["saved_order"] = []
                 user["order_items"] = []
-                shop_for_popular = user["order_shop"]  # Сохраняем магазин для популярной клавиатуры
                 user["order_shop"] = None
                 user["order_photos"] = []
                 user["order_videos"] = []
@@ -1150,10 +1161,10 @@ def handle_any_message(message):
                 user["original_order_count"] = 0
                 user["stage"] = "main"
                 
-                success_msg = "✅ Заказ дополнен и отправлен!" if is_appended else "✅ Заказ отправлен!"
+                success_msg = "✅ Заказ успешно отправлен в группу!" if is_appended else "✅ Заказ успешно отправлен!"
                 bot.send_message(chat_id, success_msg, reply_markup=get_main_menu())
                 
-                # Показываем инлайн-клавиатуру с популярными товарами для быстрого создания нового заказа
+                # ВСЕГДА показываем популярные товары или информационное сообщение
                 popular_keyboard_data = get_popular_items_keyboard()
                 if popular_keyboard_data:
                     markup, popular_items = popular_keyboard_data
@@ -1162,12 +1173,21 @@ def handle_any_message(message):
                     user["temp_shop"] = shop_for_popular  # Временно сохраняем магазин
                     
                     popular_msg = (
-                        f"🚀 Заказ успешно отправлен!\n\n"
-                        f"⭐ Хотите быстро создать новый заказ?\n"
-                        f"Топ-15 популярных позиций за неделю для магазина «{shop_for_popular}»:"
+                        f"⭐ **Хотите быстро создать новый заказ?**\n\n"
+                        f"Топ-15 популярных позиций за неделю для магазина «{shop_for_popular}»:\n"
+                        f"Выберите товары для быстрого добавления в заказ:"
                     )
                     
-                    bot.send_message(chat_id, popular_msg, reply_markup=markup)
+                    bot.send_message(chat_id, popular_msg, reply_markup=markup, parse_mode='Markdown')
+                else:
+                    # Показываем сообщение о том, что популярных товаров пока нет
+                    no_popular_msg = (
+                        f"📊 **Популярные товары**\n\n"
+                        f"Пока что нет статистики по популярным товарам для быстрого заказа.\n"
+                        f"После нескольких заказов здесь будут отображаться топ-15 наиболее часто заказываемых позиций.\n\n"
+                        f"💡 Для создания нового заказа используйте кнопку «🛍 Заказ» в главном меню."
+                    )
+                    bot.send_message(chat_id, no_popular_msg, parse_mode='Markdown')
                 
                 return
 
