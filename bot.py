@@ -321,6 +321,52 @@ def format_order_list(items, arrived=None, show_appended_info=False, original_co
                 result += f"• {item}\n"
     return result
 
+def format_order_with_attention(all_order_items, carried_items):
+    """
+    Форматирует заказ с выделением перенесённых позиций.
+    
+    Args:
+        all_order_items: Полный список позиций заказа
+        carried_items: Список перенесённых позиций из прошлого заказа
+    
+    Returns:
+        str: Форматированный текст заказа
+    """
+    if not all_order_items:
+        return "📋 Заказ пуст."
+    
+    # Разделяем позиции на перенесённые и новые
+    carried_set = set(carried_items) if carried_items else set()
+    
+    carried_order_items = []
+    new_order_items = []
+    
+    for item in all_order_items:
+        if item in carried_set:
+            carried_order_items.append(item)
+        else:
+            new_order_items.append(item)
+    
+    # Сортируем обе группы по алфавиту
+    carried_order_items.sort()
+    new_order_items.sort()
+    
+    # Формируем результат
+    result = "📦 Заказ:\n"
+    counter = 1
+    
+    # Сначала перенесённые позиции с красным восклицательным смайликом
+    for item in carried_order_items:
+        result += f"{counter}. 🔴❗ {item}\n"
+        counter += 1
+    
+    # Затем новые позиции с обычной маркировкой
+    for item in new_order_items:
+        result += f"{counter}. {item}\n"
+        counter += 1
+    
+    return result
+
 def round_to_50(value):
     remainder = value % 50
     if remainder < 25:
@@ -973,10 +1019,14 @@ def send_order(chat_id, appended=False):
         if new_items_count > 0:
             order_text += f"🆕 Добавлено новых позиций: {new_items_count}\n"
     
-    # Список заказа с эмодзи
-    order_text += "📦 Заказ:\n"
+    # Получаем перенесённые позиции для данного магазина
+    carried_items = shop_data.get(shop, {}).get("pending_delivery", [])
     
-    # Определяем какие позиции имеют фото/видео для уточнения
+    # Используем новую функцию форматирования заказа с выделением перенесённых позиций
+    formatted_order = format_order_with_attention(items, carried_items)
+    order_text += formatted_order
+    
+    # Определяем какие позиции имеют фото/видео для уточнения и добавляем пометки
     items_with_media = set()
     for photo in photos:
         # Ищем позиции, которые могут быть связаны с этим фото
@@ -989,12 +1039,11 @@ def send_order(chat_id, appended=False):
             if "фото" in item.lower() or "видео" in item.lower():
                 items_with_media.add(item)
     
-    # Форматируем список позиций
-    for i, item in enumerate(items, 1):
-        if item in items_with_media:
-            order_text += f"{i}. {item} (фото)\n"
-        else:
-            order_text += f"{i}. {item}\n"
+    # Если есть медиа-позиции, добавляем информацию о них
+    if items_with_media:
+        order_text += "\n📸 Позиции с медиа для уточнения:\n"
+        for item in items_with_media:
+            order_text += f"• {item}\n"
     
     # Добавляем информацию о вложениях, если есть медиа
     if photos or videos:
