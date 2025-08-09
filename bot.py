@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import threading
 import schedule
 import time
@@ -12,6 +12,9 @@ from dotenv import load_dotenv
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import requests  # Для работы с OpenWeather
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import random
 
 # === ЗАГРУЗКА .ENV ===
 load_dotenv()
@@ -23,6 +26,16 @@ THREAD_ID_FOR_REPORT = 3
 THREAD_ID_FOR_ORDER = 64
 GOOGLE_SHEET_NAME = 'Отчёты'
 CREDENTIALS_FILE = 'credentials.json'
+
+# === НАСТРОЙКА ЛОГИРОВАНИЯ ===
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot.log'),
+        logging.StreamHandler()
+    ]
+)
 
 # === НАСТРОЙКИ ПОГОДЫ ===
 OPENWEATHER_API_KEY = "0657e04209d46b14a466de79282d9ca7"
@@ -37,19 +50,45 @@ shop_data = {
     "Янтарь": {
         "last_order": [],
         "pending_delivery": [],
-        "accepted_delivery": []
+        "accepted_delivery": [],
+        "item_history": []  # История заказов для популярных позиций
     },
     "Хайп": {
         "last_order": [],
         "pending_delivery": [],
-        "accepted_delivery": []
+        "accepted_delivery": [],
+        "item_history": []
     },
     "Полка": {
         "last_order": [],
         "pending_delivery": [],
-        "accepted_delivery": []
+        "accepted_delivery": [],
+        "item_history": []
     }
 }
+
+# === СИСТЕМА ПУШ-УВЕДОМЛЕНИЙ ===
+user_notification_data = {}  # {user_id: {"last_notification": datetime, "notification_count": 0}}
+
+# Шаблоны утренних уведомлений (9:30-12:00)
+MORNING_NOTIFICATIONS = [
+    "🌅 Доброе утро! Не забудьте собрать заказ сегодня ✨\n💡 Успейте до 13:00 — заказ может приехать уже сегодня! 🚚",
+    "☀️ Утренний напоминатель! ⏰\n🎯 Сделайте заказ до 13:00, чтобы получить товар сегодня же! 📦✨"
+]
+
+# Шаблоны вечерних уведомлений (15:00-22:00) 
+EVENING_NOTIFICATIONS = [
+    "🔥 Много продаж сегодня! Проверьте остатки товара 📊",
+    "💰 Активный день продаж! Возможно что-то закончилось — сделайте заказ 📝",
+    "📈 Отличная торговля! Не забудьте проверить наличие товаров 🛍",
+    "🎯 Высокие продажи! Время обновить ассортимент? 📦",
+    "⚡ Бойкая торговля! Проверьте, что нужно дозаказать 🔄",
+    "🚀 Продажи идут отлично! Возможно пора пополнить склад? 📈",
+    "💫 Хороший день для бизнеса! Не упустите популярные позиции 🎪",
+    "🌟 Активные продажи! Следите за остатками ключевых товаров ⭐",
+    "🎉 Продажи на подъёме! Проверьте топовые позиции 🔝",
+    "💎 Золотой день продаж! Время заказать ходовой товар? 💰"
+]
 
 # === ХРАНИЛИЩЕ MESSAGE_ID ЗАКАЗОВ ПО МАГАЗИНАМ ===
 shop_order_messages = {}  # {shop_name: {"message_id": int, "photos": [], "videos": []}}
@@ -114,6 +153,108 @@ def weather_monitor_thread():
     while True:
         schedule.run_pending()
         time.sleep(5)
+
+# === СИСТЕМА ПУШ-УВЕДОМЛЕНИЙ ===
+def can_send_notification(user_id):
+    """Check if user can receive notification (min 1 hour interval)"""
+    if user_id not in user_notification_data:
+        return True
+    
+    last_notification = user_notification_data[user_id].get("last_notification")
+    if not last_notification:
+        return True
+    
+    if isinstance(last_notification, str):
+        last_notification = datetime.fromisoformat(last_notification)
+    
+    time_diff = datetime.now() - last_notification
+    return time_diff.total_seconds() >= 3600  # 1 hour minimum
+
+def mark_notification_sent(user_id):
+    """Mark that notification was sent to user"""
+    if user_id not in user_notification_data:
+        user_notification_data[user_id] = {"last_notification": None, "notification_count": 0}
+    
+    user_notification_data[user_id]["last_notification"] = datetime.now()
+    user_notification_data[user_id]["notification_count"] += 1
+
+def get_active_users():
+    """Get list of users who have used the bot (have user_data)"""
+    return list(user_data.keys())
+
+def send_morning_reminder():
+    """Send morning reminders about ordering (9:30-12:00, twice daily)"""
+    try:
+        active_users = get_active_users()
+        message = random.choice(MORNING_NOTIFICATIONS)
+        
+        for user_id in active_users:
+            if can_send_notification(user_id):
+                try:
+                    bot.send_message(user_id, message)
+                    mark_notification_sent(user_id)
+                    logging.info(f"Morning reminder sent to user {user_id}")
+                except Exception as e:
+                    logging.warning(f"Failed to send morning reminder to user {user_id}: {e}")
+    except Exception as e:
+        logging.error(f"Error in send_morning_reminder: {e}")
+
+def send_evening_sales_reminder():
+    """Send evening sales reminders (15:00-22:00, multiple times)"""
+    try:
+        active_users = get_active_users()
+        message = random.choice(EVENING_NOTIFICATIONS)
+        
+        for user_id in active_users:
+            if can_send_notification(user_id):
+                try:
+                    bot.send_message(user_id, message)
+                    mark_notification_sent(user_id)
+                    logging.info(f"Evening reminder sent to user {user_id}")
+                except Exception as e:
+                    logging.warning(f"Failed to send evening reminder to user {user_id}: {e}")
+    except Exception as e:
+        logging.error(f"Error in send_evening_sales_reminder: {e}")
+
+def setup_push_notifications():
+    """Setup APScheduler for push notifications"""
+    try:
+        scheduler = BackgroundScheduler()
+        
+        # Morning reminders: twice between 9:30-12:00
+        scheduler.add_job(
+            send_morning_reminder,
+            CronTrigger(hour=9, minute=30),
+            id='morning_reminder_1'
+        )
+        scheduler.add_job(
+            send_morning_reminder,
+            CronTrigger(hour=11, minute=0),
+            id='morning_reminder_2'
+        )
+        
+        # Evening reminders: 5-10 times between 15:00-22:00 at random intervals
+        evening_hours = [15, 16, 17, 18, 19, 20, 21, 22]
+        evening_minutes = [0, 15, 30, 45]
+        
+        # Schedule 8 evening reminders at different times
+        for i in range(8):
+            hour = random.choice(evening_hours)
+            minute = random.choice(evening_minutes)
+            job_id = f'evening_reminder_{i+1}'
+            
+            scheduler.add_job(
+                send_evening_sales_reminder,
+                CronTrigger(hour=hour, minute=minute),
+                id=job_id
+            )
+        
+        scheduler.start()
+        logging.info("Push notification scheduler started successfully")
+        return scheduler
+    except Exception as e:
+        logging.error(f"Failed to setup push notifications: {e}")
+        return None
 
 # Запуск мониторинга в отдельном потоке
 weather_thread = threading.Thread(target=weather_monitor_thread, daemon=True)
@@ -200,6 +341,7 @@ def get_confirm_menu():
 def get_order_action_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("✅ Отправить заказ", "✏️ Изменить заказ")
+    markup.add("🔥 Популярные позиции", "🗑 Удалить позицию")
     markup.add("💾 Сохранить заказ (не отправлять)", "❌ Отмена")
     return markup
 
@@ -251,6 +393,86 @@ def deduplicate_order_items(items):
             seen.add(item_lower)
             unique_items.append(item)
     return unique_items
+
+def add_items_to_history(shop, items):
+    """Add items to shop's order history with timestamp"""
+    if not items or shop not in shop_data:
+        return
+    
+    timestamp = datetime.now()
+    for item in items:
+        if not is_photo_related_item(item):  # Don't track photo-related items
+            shop_data[shop]["item_history"].append({
+                "item": item.strip(),
+                "timestamp": timestamp.isoformat()
+            })
+
+def get_popular_items(shop, days=7, limit=15):
+    """Get top popular items for shop based on order frequency in last N days"""
+    if shop not in shop_data:
+        return []
+    
+    # Calculate cutoff date
+    cutoff_date = datetime.now() - timedelta(days=days)
+    
+    # Count item frequency in specified period
+    item_counts = {}
+    for entry in shop_data[shop]["item_history"]:
+        entry_date = datetime.fromisoformat(entry["timestamp"])
+        if entry_date >= cutoff_date:
+            item = entry["item"]
+            item_counts[item] = item_counts.get(item, 0) + 1
+    
+    # Sort by frequency and return top items
+    sorted_items = sorted(item_counts.items(), key=lambda x: x[1], reverse=True)
+    return [item[0] for item in sorted_items[:limit]]
+
+def get_popular_items_keyboard(shop):
+    """Create inline keyboard with popular items for shop"""
+    popular_items = get_popular_items(shop)
+    
+    if not popular_items:
+        # Return empty keyboard if no popular items
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔍 Популярных позиций пока нет", callback_data="popular_empty"))
+        return markup
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    
+    for i, item in enumerate(popular_items):
+        # Truncate long item names for button display
+        display_name = item[:25] + "..." if len(item) > 25 else item
+        callback_data = f"popular_add_{i}"
+        buttons.append(types.InlineKeyboardButton(f"➕ {display_name}", callback_data=callback_data))
+    
+    # Add buttons in rows of 2
+    for i in range(0, len(buttons), 2):
+        row = buttons[i:i+2]
+        markup.add(*row)
+    
+    # Add close button
+    markup.add(types.InlineKeyboardButton("❌ Закрыть", callback_data="popular_close"))
+    return markup
+
+def get_order_edit_keyboard(order_items):
+    """Create inline keyboard for editing current order (removing items)"""
+    if not order_items:
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("📋 Заказ пуст", callback_data="edit_empty"))
+        return markup
+    
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    
+    for i, item in enumerate(order_items):
+        # Truncate long item names for button display
+        display_name = item[:40] + "..." if len(item) > 40 else item
+        callback_data = f"edit_remove_{i}"
+        markup.add(types.InlineKeyboardButton(f"🗑 {display_name}", callback_data=callback_data))
+    
+    # Add done button
+    markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="edit_done"))
+    return markup
 
 def is_photo_related_item(item):
     """Check if item contains photo-related keywords that should not go to delivery"""
@@ -599,6 +821,131 @@ def handle_staff_callback(call):
     bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=get_staff_keyboard(selected))
     bot.answer_callback_query(call.id)
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith('popular_'))
+def handle_popular_items_callback(call):
+    chat_id = call.message.chat.id
+    user = user_data.get(chat_id)
+    if not user or user.get('stage') != 'order_input':
+        bot.answer_callback_query(call.id, "❌ Сессия заказа истекла")
+        return
+
+    shop = user.get("order_shop")
+    if not shop:
+        bot.answer_callback_query(call.id, "❌ Магазин не выбран")
+        return
+
+    if call.data == 'popular_close':
+        bot.delete_message(chat_id, call.message.message_id)
+        bot.answer_callback_query(call.id, "Популярные позиции закрыты")
+        return
+
+    if call.data == 'popular_empty':
+        bot.answer_callback_query(call.id, "Популярных позиций пока нет")
+        return
+
+    if call.data.startswith('popular_add_'):
+        try:
+            item_index = int(call.data.replace('popular_add_', ''))
+            popular_items = get_popular_items(shop)
+            
+            if 0 <= item_index < len(popular_items):
+                selected_item = popular_items[item_index]
+                
+                # Add item to current order
+                user["order_items"].append(selected_item)
+                
+                # Show confirmation
+                bot.answer_callback_query(call.id, f"➕ Добавлено: {selected_item}")
+                
+                # Update the order display
+                is_appended = user.get("order_is_appended", False)
+                original_count = user.get("original_order_count", 0)
+                order_text = format_order_list(user["order_items"], show_appended_info=is_appended, original_count=original_count)
+                
+                # Edit the message to show updated order or send new message
+                try:
+                    bot.edit_message_text(
+                        f"➕ Добавлен товар: {selected_item}\n\n{order_text}",
+                        chat_id, 
+                        call.message.message_id
+                    )
+                    bot.edit_message_reply_markup(
+                        chat_id, 
+                        call.message.message_id, 
+                        reply_markup=get_popular_items_keyboard(shop)
+                    )
+                except:
+                    # If editing fails, delete and send new message
+                    bot.delete_message(chat_id, call.message.message_id)
+                    bot.send_message(chat_id, f"➕ Добавлен товар: {selected_item}\n\n{order_text}")
+            else:
+                bot.answer_callback_query(call.id, "❌ Товар не найден")
+        except (ValueError, IndexError):
+            bot.answer_callback_query(call.id, "❌ Ошибка добавления товара")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('edit_'))
+def handle_order_edit_callback(call):
+    chat_id = call.message.chat.id
+    user = user_data.get(chat_id)
+    if not user or user.get('stage') != 'order_editing':
+        bot.answer_callback_query(call.id, "❌ Сессия редактирования истекла")
+        return
+
+    if call.data == 'edit_done':
+        # Finish editing and return to order input
+        user['stage'] = 'order_input'
+        bot.delete_message(chat_id, call.message.message_id)
+        
+        # Show updated order
+        is_appended = user.get("order_is_appended", False)
+        original_count = user.get("original_order_count", 0)
+        order_text = format_order_list(user["order_items"], show_appended_info=is_appended, original_count=original_count)
+        bot.send_message(chat_id, f"✅ Редактирование завершено\n\n{order_text}", reply_markup=get_order_action_menu())
+        bot.answer_callback_query(call.id, "✅ Готово")
+        return
+
+    if call.data == 'edit_empty':
+        bot.answer_callback_query(call.id, "Заказ пуст")
+        return
+
+    if call.data.startswith('edit_remove_'):
+        try:
+            item_index = int(call.data.replace('edit_remove_', ''))
+            order_items = user["order_items"]
+            
+            if 0 <= item_index < len(order_items):
+                removed_item = order_items.pop(item_index)
+                bot.answer_callback_query(call.id, f"🗑 Удалено: {removed_item}")
+                
+                # Update the keyboard with remaining items
+                try:
+                    new_markup = get_order_edit_keyboard(user["order_items"])
+                    remaining_text = "📝 Редактирование заказа\n\nВыберите позицию для удаления:"
+                    if user["order_items"]:
+                        remaining_text += f"\n\nОсталось позиций: {len(user['order_items'])}"
+                    else:
+                        remaining_text = "📋 Заказ очищен полностью"
+                    
+                    bot.edit_message_text(
+                        remaining_text,
+                        chat_id,
+                        call.message.message_id,
+                        reply_markup=new_markup
+                    )
+                except:
+                    # If editing fails, send new message
+                    bot.delete_message(chat_id, call.message.message_id)
+                    remaining_text = "📝 Редактирование заказа\n\nВыберите позицию для удаления:"
+                    if user["order_items"]:
+                        remaining_text += f"\n\nОсталось позиций: {len(user['order_items'])}"
+                    else:
+                        remaining_text = "📋 Заказ очищен полностью"
+                    bot.send_message(chat_id, remaining_text, reply_markup=get_order_edit_keyboard(user["order_items"]))
+            else:
+                bot.answer_callback_query(call.id, "❌ Позиция не найдена")
+        except (ValueError, IndexError):
+            bot.answer_callback_query(call.id, "❌ Ошибка удаления позиции")
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith('delivery_'))
 def handle_delivery_callback(call):
     chat_id = call.message.chat.id
@@ -726,7 +1073,35 @@ def handle_any_message(message):
 
     # Order handling
     if user["stage"] == "order_input":
-        if text in ["✅ Отправить заказ", "✏️ Изменить заказ", "💾 Сохранить заказ (не отправлять)", "❌ Отмена"]:
+        if text in ["✅ Отправить заказ", "✏️ Изменить заказ", "🔥 Популярные позиции", "🗑 Удалить позицию", "💾 Сохранить заказ (не отправлять)", "❌ Отмена"]:
+            if text == "🔥 Популярные позиции":
+                shop = user.get("order_shop")
+                if not shop:
+                    bot.send_message(chat_id, "⚠️ Магазин не выбран.")
+                    return
+                
+                keyboard = get_popular_items_keyboard(shop)
+                bot.send_message(
+                    chat_id, 
+                    f"🔥 Популярные позиции для магазина «{shop}»:\n\nВыберите позицию для добавления в заказ:",
+                    reply_markup=keyboard
+                )
+                return
+
+            if text == "🗑 Удалить позицию":
+                if not user["order_items"]:
+                    bot.send_message(chat_id, "⚠️ Заказ пуст, нечего удалять.")
+                    return
+                
+                user["stage"] = "order_editing"
+                keyboard = get_order_edit_keyboard(user["order_items"])
+                bot.send_message(
+                    chat_id,
+                    "📝 Редактирование заказа\n\nВыберите позицию для удаления:",
+                    reply_markup=keyboard
+                )
+                return
+
             if text == "✅ Отправить заказ":
                 if not user["order_items"]:
                     bot.send_message(chat_id, "⚠️ Заказ пуст, нечего отправлять.")
@@ -821,6 +1196,11 @@ def handle_any_message(message):
         bot.send_message(chat_id, order_text)
         bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
         user["stage"] = "order_input"
+        return
+
+    if user.get("stage") == "order_editing":
+        # User is in inline keyboard editing mode, redirect back to order input
+        bot.send_message(chat_id, "🔧 Используйте кнопки для редактирования заказа или нажмите 'Готово'")
         return
 
     if text == "📦 Прием поставки":
@@ -1130,6 +1510,9 @@ def send_order(chat_id, appended=False):
     # СОХРАНЯЕМ ЗАКАЗ В ГЛОБАЛЬНЫХ ДАННЫХ МАГАЗИНА
     shop_data[shop]["last_order"] = items.copy()
     
+    # ДОБАВЛЯЕМ ПОЗИЦИИ В ИСТОРИЮ ДЛЯ ПОПУЛЯРНЫХ ТОВАРОВ
+    add_items_to_history(shop, items)
+    
     # ВАЖНО: Обновляем pending_delivery только новыми позициями, ИСКЛЮЧАЯ фото-позиции
     # Исключаем уже принятые товары из pending_delivery и фото-позиции
     accepted_items = shop_data[shop]["accepted_delivery"]
@@ -1137,4 +1520,8 @@ def send_order(chat_id, appended=False):
     shop_data[shop]["pending_delivery"] = new_pending_items
 
 print("✅ Бот запущен...")
+
+# Initialize push notification system
+notification_scheduler = setup_push_notifications()
+
 bot.infinity_polling()
