@@ -204,7 +204,8 @@ def get_confirm_menu():
 def get_order_action_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("✅ Отправить заказ", "🗑 Удалить из заказа")
-    markup.add("💾 Сохранить заказ (не отправлять)", "❌ Отмена")
+    markup.add("⭐ Популярные товары", "💾 Сохранить заказ (не отправлять)")
+    markup.add("❌ Отмена")
     return markup
 
 def get_delivery_confirm_menu():
@@ -588,27 +589,9 @@ def choose_shop(message):
             user["order_items"] = combined_items
             user["order_is_appended"] = len(combined_items) > 0
             user["original_order_count"] = len(combined_items)
+            user["stage"] = "order_input"
             
-            # Step 6: Show popular items if available, otherwise go to order input
-            popular_keyboard_data = get_popular_items_keyboard()
-            if popular_keyboard_data and not combined_items:
-                # Показываем популярные товары только если заказ пуст
-                markup, popular_items = popular_keyboard_data
-                user["popular_items_list"] = popular_items
-                user["stage"] = "popular_items"
-                
-                popular_msg = (
-                    f"🛒 Выбран магазин для заказа: «{shop}»\n\n"
-                    f"⭐ Топ-15 популярных позиций за неделю:\n"
-                    f"Выберите товары для быстрого добавления в заказ:"
-                )
-                
-                bot.send_message(chat_id, popular_msg, reply_markup=markup)
-                return
-            else:
-                user["stage"] = "order_input"
-            
-            # Step 5: Create one consolidated message with all information
+            # Step 6: Create one consolidated message with all information
             consolidated_msg = f"🛒 Выбран магазин для заказа: «{shop}»\n"
             
             # Step 6: Add order information if there are existing items
@@ -672,24 +655,11 @@ def choose_shop(message):
             user["order_is_appended"] = len(combined_items) > len(saved_items)
             user["original_order_count"] = len(combined_items)
             
-            # Step 6: Check if we should show popular items
-            popular_keyboard_data = get_popular_items_keyboard()
-            if popular_keyboard_data and not combined_items:
-                # Показываем популярные товары только если заказ пуст (что маловероятно с saved_order)
-                markup, popular_items = popular_keyboard_data
-                user["popular_items_list"] = popular_items
-                user["stage"] = "popular_items"
-                
-                popular_msg = (
-                    f"🛒 Выбран магазин для заказа: «{shop}»\n\n"
-                    f"⭐ Топ-15 популярных позиций за неделю:\n"
-                    f"Выберите товары для быстрого добавления в заказ:"
-                )
-                
-                bot.send_message(chat_id, popular_msg, reply_markup=markup)
-                return
-            else:
-                user["stage"] = "order_input"
+            # Step 5: Set up order state
+            user["order_items"] = combined_items
+            user["order_is_appended"] = len(combined_items) > len(saved_items)
+            user["original_order_count"] = len(combined_items)
+            user["stage"] = "order_input"
             
             # Step 6: Create consolidated message
             consolidated_msg = f"🛒 Выбран магазин для заказа: «{shop}»\n"
@@ -791,7 +761,7 @@ def handle_popular_items_callback(call):
             # Обычная логика для popular_items
             user['stage'] = 'order_input'
             bot.edit_message_text(
-                "➡️ Популярные товары пропущены. Вводите позиции заказа:",
+                "➡️ Популярные товары пропущены. Продолжайте вводить позиции заказа или используйте кнопки действий:",
                 chat_id, 
                 call.message.message_id
             )
@@ -846,7 +816,7 @@ def handle_popular_items_callback(call):
                         order_text = format_order_list(user['order_items'])
                         bot.edit_message_text(
                             f"✅ Товар «{selected_item}» добавлен в заказ!\n\n{order_text}\n\n"
-                            "Выберите еще товары или пропустите:",
+                            "Выберите еще товары или пропустите и переходите к действиям с заказом:",
                             chat_id,
                             call.message.message_id,
                             reply_markup=call.message.reply_markup
@@ -1164,31 +1134,24 @@ def handle_any_message(message):
                 success_msg = "✅ Заказ успешно отправлен в группу!" if is_appended else "✅ Заказ успешно отправлен!"
                 bot.send_message(chat_id, success_msg, reply_markup=get_main_menu())
                 
-                # ВСЕГДА показываем популярные товары или информационное сообщение
+                return
+
+            if text == "⭐ Популярные товары":
+                # Show popular items when explicitly requested
                 popular_keyboard_data = get_popular_items_keyboard()
                 if popular_keyboard_data:
                     markup, popular_items = popular_keyboard_data
                     user["popular_items_list"] = popular_items
-                    user["stage"] = "popular_after_order"
-                    user["temp_shop"] = shop_for_popular  # Временно сохраняем магазин
+                    user["stage"] = "popular_items"
                     
                     popular_msg = (
-                        f"⭐ **Хотите быстро создать новый заказ?**\n\n"
-                        f"Топ-15 популярных позиций за неделю для магазина «{shop_for_popular}»:\n"
+                        f"⭐ Топ-15 популярных позиций за неделю:\n"
                         f"Выберите товары для быстрого добавления в заказ:"
                     )
                     
-                    bot.send_message(chat_id, popular_msg, reply_markup=markup, parse_mode='Markdown')
+                    bot.send_message(chat_id, popular_msg, reply_markup=markup)
                 else:
-                    # Показываем сообщение о том, что популярных товаров пока нет
-                    no_popular_msg = (
-                        f"📊 **Популярные товары**\n\n"
-                        f"Пока что нет статистики по популярным товарам для быстрого заказа.\n"
-                        f"После нескольких заказов здесь будут отображаться топ-15 наиболее часто заказываемых позиций.\n\n"
-                        f"💡 Для создания нового заказа используйте кнопку «🛍 Заказ» в главном меню."
-                    )
-                    bot.send_message(chat_id, no_popular_msg, parse_mode='Markdown')
-                
+                    bot.send_message(chat_id, "📊 Пока нет статистики по популярным товарам. После нескольких заказов здесь будут отображаться наиболее часто заказываемые позиции.", reply_markup=get_order_action_menu())
                 return
 
             if text == "🗑 Удалить из заказа":
@@ -1236,20 +1199,21 @@ def handle_any_message(message):
                 user["stage"] = "main"
                 bot.send_message(chat_id, "❌ Действие отменено.", reply_markup=get_main_menu())
                 return
+            
+            # If it's not a button command, treat it as order items input
+            items = sanitize_input(text)
+            if items:
+                # Use merge_order function instead of simple addition
+                user["order_items"] = merge_order(chat_id, items)
+                
+                # Show enhanced order information if this is an appended order
+                is_appended = user.get("order_is_appended", False)
+                original_count = user.get("original_order_count", 0)
+                order_text = format_order_list(user["order_items"], show_appended_info=is_appended, original_count=original_count)
+                bot.send_message(chat_id, order_text)
+                bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
             else:
-                items = sanitize_input(text)
-                if items:
-                    # Use merge_order function instead of simple addition
-                    user["order_items"] = merge_order(chat_id, items)
-                    
-                    # Show enhanced order information if this is an appended order
-                    is_appended = user.get("order_is_appended", False)
-                    original_count = user.get("original_order_count", 0)
-                    order_text = format_order_list(user["order_items"], show_appended_info=is_appended, original_count=original_count)
-                    bot.send_message(chat_id, order_text)
-                    bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
-                else:
-                    bot.send_message(chat_id, "⚠️ Введите товары через запятую или с новой строки.")
+                bot.send_message(chat_id, "⚠️ Введите товары через запятую или с новой строки.")
         return
 
     # Обработка ввода товаров когда пользователь находится в стадии популярных товаров  
