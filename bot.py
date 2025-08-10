@@ -61,9 +61,6 @@ item_statistics = {}
 # === СПИСОК СОТРУДНИКОВ ===
 STAFF_LIST = ["Данил", "Даниз", "Даша", "Соня", "Оксана", "Лиза"]
 
-# === СПИСОК ПРОДАВЦОВ ===
-SELLER_LIST = ["Данил", "Даниз", "Даша", "Соня", "Оксана", "Лиза"]
-
 # === GOOGLE SHEETS ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
@@ -227,19 +224,6 @@ def get_staff_keyboard(selected_staff=None):
         buttons.append(types.InlineKeyboardButton(text, callback_data=callback_data))
     markup.add(*buttons)
     markup.add(types.InlineKeyboardButton("Далее", callback_data="staff_done"))
-    return markup
-
-# DEPRECATED: Seller selection removed - this function is no longer used
-def get_seller_keyboard(selected_sellers=None):
-    selected_sellers = selected_sellers or []
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    buttons = []
-    for seller in SELLER_LIST:
-        text = f"✅ {seller}" if seller in selected_sellers else seller
-        callback_data = f"seller_{seller}"
-        buttons.append(types.InlineKeyboardButton(text, callback_data=callback_data))
-    markup.add(*buttons)
-    markup.add(types.InlineKeyboardButton("✅ Отправить заказ", callback_data="sellers_done"))
     return markup
 
 def get_delivery_keyboard(pending_items, arrived_items=None):
@@ -519,7 +503,6 @@ def start(message):
         "delivery_arrived": [],  # Временный список прибывших товаров при приемке
         "delivery_message_id": None,  # ID сообщения с кнопками приёмки
         "selected_staff": [],  # Выбранные сотрудники для отчета
-        "selected_sellers": [],  # Выбранные продавцы для заказа
         "order_is_appended": False,  # Флаг объединения заказа (временный)
         "original_order_count": 0,  # Количество позиций до объединения (временно)
         "saved_order": [],  # Локально сохраненный заказ пользователя
@@ -556,7 +539,6 @@ def choose_shop(message):
             "delivery_arrived": [],
             "delivery_message_id": None,
             "selected_staff": [],
-            "selected_sellers": [],
             "order_is_appended": False,
             "original_order_count": 0,
             "saved_order": [],
@@ -947,6 +929,8 @@ def handle_order_removal_callback(call):
             return
         
         bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('staff_'))
 def handle_staff_callback(call):
     chat_id = call.message.chat.id
     user = user_data.get(chat_id)
@@ -968,71 +952,6 @@ def handle_staff_callback(call):
         selected.append(staff_name)
 
     bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=get_staff_keyboard(selected))
-    bot.answer_callback_query(call.id)
-
-# DEPRECATED: Seller selection removed - orders now sent directly without seller selection
-@bot.callback_query_handler(func=lambda call: call.data.startswith('seller_'))
-def handle_seller_callback(call):
-    chat_id = call.message.chat.id
-    user = user_data.get(chat_id)
-    if not user or user.get('stage') != 'choose_sellers':
-        bot.answer_callback_query(call.id, "❌ Сессия истекла")
-        return
-
-    seller_name = call.data.replace('seller_', '')
-    if seller_name == 'done':
-        # Actually send the order now
-        try:
-            bot.set_message_reaction(chat_id, call.message.message_id, [types.ReactionTypeEmoji("✅")])
-        except Exception as e:
-            print(f"Не удалось добавить реакцию: {e}")
-        
-        # Мгновенная обратная связь - подтверждение принятия заказа
-        is_appended = user.get("order_is_appended", False)
-        shop_for_popular = user["order_shop"]
-        order_count = len(user["order_items"])
-        selected_sellers = user.get("selected_sellers", [])
-        
-        instant_confirmation = (
-            f"✅ **Заказ принят!**\n\n"
-            f"🏪 Магазин: **{shop_for_popular}**\n"
-            f"📦 Позиций в заказе: **{order_count}**\n"
-            f"👥 Продавцы: **{', '.join(selected_sellers) if selected_sellers else 'не выбраны'}**\n"
-            f"🚀 Заказ {'дополнен и ' if is_appended else ''}отправляется..."
-        )
-        bot.edit_message_text(instant_confirmation, chat_id, call.message.message_id, parse_mode='Markdown')
-        
-        # Трекинг популярности товаров при отправке заказа
-        for item in user["order_items"]:
-            track_order_item(item)
-        
-        # Отправляем заказ в группу
-        send_order(chat_id, appended=is_appended)
-        
-        # Reset order state
-        user["saved_order"] = []
-        user["order_items"] = []
-        user["order_shop"] = None
-        user["order_photos"] = []
-        user["order_videos"] = []
-        user["order_is_appended"] = False
-        user["original_order_count"] = 0
-        user["selected_sellers"] = []
-        user["stage"] = "main"
-        
-        success_msg = "✅ Заказ успешно отправлен в группу!" if is_appended else "✅ Заказ успешно отправлен!"
-        bot.send_message(chat_id, success_msg, reply_markup=get_main_menu())
-        
-        bot.answer_callback_query(call.id, "✅ Заказ отправлен!")
-        return
-
-    selected = user.setdefault('selected_sellers', [])
-    if seller_name in selected:
-        selected.remove(seller_name)
-    else:
-        selected.append(seller_name)
-
-    bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=get_seller_keyboard(selected))
     bot.answer_callback_query(call.id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('delivery_'))
@@ -1188,7 +1107,6 @@ def handle_any_message(message):
                     f"✅ **Заказ принят!**\n\n"
                     f"🏪 Магазин: **{shop_for_popular}**\n"
                     f"📦 Позиций в заказе: **{order_count}**\n"
-                    f"👥 Продавцы: **не выбраны**\n"
                     f"🚀 Заказ {'дополнен и ' if is_appended else ''}отправляется..."
                 )
                 confirmation_msg = bot.send_message(chat_id, instant_confirmation, parse_mode='Markdown')
@@ -1208,7 +1126,6 @@ def handle_any_message(message):
                 user["order_videos"] = []
                 user["order_is_appended"] = False
                 user["original_order_count"] = 0
-                user["selected_sellers"] = []
                 user["stage"] = "main"
                 
                 success_msg = "✅ Заказ успешно отправлен в группу!" if is_appended else "✅ Заказ успешно отправлен!"
@@ -1264,7 +1181,6 @@ def handle_any_message(message):
                 user["order_videos"] = []
                 user["order_is_appended"] = False
                 user["original_order_count"] = 0
-                user["selected_sellers"] = []
                 user["stage"] = "main"
                 bot.send_message(chat_id, "💾 Заказ сохранён. Чтобы отправить — зайдите в заказ и нажмите «✅ Отправить заказ»", reply_markup=get_main_menu())
                 return
@@ -1276,7 +1192,6 @@ def handle_any_message(message):
                 user["order_videos"] = []
                 user["order_is_appended"] = False
                 user["original_order_count"] = 0
-                user["selected_sellers"] = []
                 user["stage"] = "main"
                 bot.send_message(chat_id, "❌ Действие отменено.", reply_markup=get_main_menu())
                 return
@@ -1499,13 +1414,6 @@ def send_order(chat_id, appended=False):
 
     # Создаем новый структурированный формат сообщения заказа
     order_text = f"🛒 Заказ для магазина: <b>{shop}</b>\n"
-    
-    # Информация о выбранных продавцах
-    selected_sellers = user.get("selected_sellers", [])
-    if selected_sellers:
-        order_text += f"👥 Продавцы: <b>{', '.join(selected_sellers)}</b>\n"
-    else:
-        order_text += f"👥 Продавцы: <b>не выбраны</b>\n"
     
     # Информация о переносе позиций
     if appended:
