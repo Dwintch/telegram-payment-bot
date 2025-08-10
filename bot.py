@@ -229,6 +229,7 @@ def get_staff_keyboard(selected_staff=None):
     markup.add(types.InlineKeyboardButton("Далее", callback_data="staff_done"))
     return markup
 
+# DEPRECATED: Seller selection removed - this function is no longer used
 def get_seller_keyboard(selected_sellers=None):
     selected_sellers = selected_sellers or []
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -969,6 +970,7 @@ def handle_staff_callback(call):
     bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=get_staff_keyboard(selected))
     bot.answer_callback_query(call.id)
 
+# DEPRECATED: Seller selection removed - orders now sent directly without seller selection
 @bot.callback_query_handler(func=lambda call: call.data.startswith('seller_'))
 def handle_seller_callback(call):
     chat_id = call.message.chat.id
