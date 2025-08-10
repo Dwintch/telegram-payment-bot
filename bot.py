@@ -1176,10 +1176,41 @@ def handle_any_message(message):
                     bot.send_message(chat_id, "⚠️ Заказ пуст, нечего отправлять.")
                     return
                 
-                # Переходим к выбору продавцов перед отправкой заказа
-                user["stage"] = "choose_sellers"
+                # Отправляем заказ сразу без выбора продавцов
+                is_appended = user.get("order_is_appended", False)
+                shop_for_popular = user["order_shop"]
+                order_count = len(user["order_items"])
+                
+                # Мгновенная обратная связь - подтверждение принятия заказа
+                instant_confirmation = (
+                    f"✅ **Заказ принят!**\n\n"
+                    f"🏪 Магазин: **{shop_for_popular}**\n"
+                    f"📦 Позиций в заказе: **{order_count}**\n"
+                    f"👥 Продавцы: **не выбраны**\n"
+                    f"🚀 Заказ {'дополнен и ' if is_appended else ''}отправляется..."
+                )
+                confirmation_msg = bot.send_message(chat_id, instant_confirmation, parse_mode='Markdown')
+                
+                # Трекинг популярности товаров при отправке заказа
+                for item in user["order_items"]:
+                    track_order_item(item)
+                
+                # Отправляем заказ в группу
+                send_order(chat_id, appended=is_appended)
+                
+                # Reset order state
+                user["saved_order"] = []
+                user["order_items"] = []
+                user["order_shop"] = None
+                user["order_photos"] = []
+                user["order_videos"] = []
+                user["order_is_appended"] = False
+                user["original_order_count"] = 0
                 user["selected_sellers"] = []
-                bot.send_message(chat_id, "👥 Выберите продавцов для заказа (можно выбрать несколько):", reply_markup=get_seller_keyboard())
+                user["stage"] = "main"
+                
+                success_msg = "✅ Заказ успешно отправлен в группу!" if is_appended else "✅ Заказ успешно отправлен!"
+                bot.send_message(chat_id, success_msg, reply_markup=get_main_menu())
                 return
 
             elif text == "⭐ Популярные товары":
