@@ -929,6 +929,8 @@ def handle_order_removal_callback(call):
             return
         
         bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('staff_'))
 def handle_staff_callback(call):
     chat_id = call.message.chat.id
     user = user_data.get(chat_id)
