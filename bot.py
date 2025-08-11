@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 Telegram Payment Bot with Automatic Reminder System
@@ -7,7 +8,6 @@ Telegram Payment Bot with Automatic Reminder System
 - Система заказов с фото/видео поддержкой  
 - Приём поставок с интерактивными кнопками
 - Автоматические напоминания (НОВОЕ!)
-- Умные уведомления для отчётов и заказов (НОВОЕ!)
 
 Система автоматических напоминаний:
 1. Мотивационные ЛС-уведомления пользователям:
@@ -23,25 +23,12 @@ Telegram Payment Bot with Automatic Reminder System
    - Метка "НАПОМИНАНИЕ" и мотивирующие формулировки
    - Отправка в CHAT_ID_FOR_REPORT
 
-3. УМНЫЕ УВЕДОМЛЕНИЯ ДЛЯ ОТЧЁТОВ (НОВОЕ!):
-   - 22:00-23:00: До 4 напоминаний о необходимости составить отчёт
-   - 23:00-00:00: Креативные вопросы о missing отчётах ("А пачемууууу отчета нету????")
-   - Отправка всем пользователям ЛС
-   - Разные тексты для уменьшения надоедливости
-
-4. УМНЫЕ УВЕДОМЛЕНИЯ ДЛЯ ЗАКАЗОВ (НОВОЕ!):
-   - 22:00-00:00: Поощрения за поздние заказы + мотивация заказывать раньше
-   - 09:00-15:00: Мягкие упрёки о том, что заказ может не успеть обработаться
-   - Реакция сразу после отправки заказа
-   - Разные тексты для каждого случая
-
 Технические особенности:
 - APScheduler для гибкого планирования
-- Московский часовой пояс (pytz)
+- Московский часовой пояс
 - Ежедневная перегенерация расписания
 - Отслеживание всех пользователей
-- Анти-повтор логика для сообщений (get_random_message_with_no_repeat)
-- Хирургическая интеграция без нарушения существующего функционала
+- Анти-повтор логика для сообщений
 """
 
 import os
@@ -58,7 +45,6 @@ from dotenv import load_dotenv
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import requests  # Для работы с OpenWeather
-from rapidfuzz import fuzz, process  # Для нормализации названий товаров
 
 # APScheduler imports
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -644,91 +630,6 @@ def get_weather_report():
     report += f"Средний ветер: <b>{avg_wind} м/с</b>"
     return report
 
-# === НОРМАЛИЗАЦИЯ ТОВАРОВ ===
-def load_known_items():
-    """
-    Загружает список эталонных названий товаров из файла known_items.json.
-    
-    Returns:
-        list: Список эталонных названий товаров
-    """
-    try:
-        with open('known_items.json', 'r', encoding='utf-8') as f:
-            items = json.load(f)
-            return [item.strip() for item in items if item.strip()]  # Убираем пустые строки
-    except (FileNotFoundError, json.JSONDecodeError, Exception) as e:
-        logging.warning(f"Не удалось загрузить known_items.json: {e}")
-        return []
-
-def normalize_order_items(order_items, known_items, threshold=75):
-    """
-    Нормализует названия товаров в заказе через fuzzy matching с эталонными названиями.
-    
-    Args:
-        order_items (list): Список позиций заказа
-        known_items (list): Список эталонных названий
-        threshold (int): Минимальный процент сходства для замены (0-100)
-    
-    Returns:
-        dict: {
-            'normalized_items': list,  # Нормализованные позиции
-            'changes': list           # Список изменений {'original': str, 'corrected': str}
-        }
-    """
-    if not known_items:
-        return {'normalized_items': order_items.copy(), 'changes': []}
-    
-    normalized_items = []
-    changes = []
-    
-    for item in order_items:
-        # Пробуем разные алгоритмы для поиска лучшего совпадения
-        token_sort_match = process.extractOne(item, known_items, scorer=fuzz.token_sort_ratio, score_cutoff=threshold)
-        token_set_match = process.extractOne(item, known_items, scorer=fuzz.token_set_ratio, score_cutoff=threshold)
-        
-        # Для partial_ratio требуем более высокий порог и дополнительную проверку
-        partial_match = process.extractOne(item, known_items, scorer=fuzz.partial_ratio, score_cutoff=threshold+5)
-        
-        # Также проверяем обычное ratio для фильтрации ложных срабатываний
-        ratio_match = process.extractOne(item, known_items, scorer=fuzz.ratio, score_cutoff=50)
-        
-        # Собираем все валидные совпадения
-        valid_matches = []
-        
-        # token-based matches проходят без дополнительных проверок
-        if token_sort_match:
-            valid_matches.append(token_sort_match)
-        if token_set_match:
-            valid_matches.append(token_set_match)
-            
-        # partial match проходит только если ratio тоже приемлемый
-        if partial_match and ratio_match and ratio_match[0] == partial_match[0]:
-            # Требуем чтобы ratio был не менее 50% для partial matches
-            if ratio_match[1] >= 50:
-                valid_matches.append(partial_match)
-        
-        # Выбираем лучший результат из валидных совпадений
-        best_match = None
-        for match in valid_matches:
-            if match and (not best_match or match[1] > best_match[1]):
-                best_match = match
-        
-        if best_match and best_match[0] != item:
-            # best_match[0] - найденный текст, best_match[1] - рейтинг
-            normalized_items.append(best_match[0])
-            changes.append({
-                'original': item,
-                'corrected': best_match[0],
-                'similarity': best_match[1]
-            })
-        else:
-            normalized_items.append(item)
-    
-    return {
-        'normalized_items': normalized_items,
-        'changes': changes
-    }
-
 # === КНОПКИ ===
 def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -754,7 +655,6 @@ def get_order_action_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("✅ Отправить заказ", "🗑 Удалить из заказа")
     markup.add("⭐ Популярные товары", "💾 Сохранить заказ (не отправлять)")
-    markup.add("✨ Сделать текст красивее (тест)")  # Кнопка нормализации товаров
     markup.add("❌ Отмена")
     return markup
 
@@ -1702,7 +1602,7 @@ def handle_any_message(message):
 
     # Order handling
     if user["stage"] == "order_input":
-        if text in ["✅ Отправить заказ", "🗑 Удалить из заказа", "⭐ Популярные товары", "💾 Сохранить заказ (не отправлять)", "✨ Сделать текст красивее (тест)", "❌ Отмена"]:
+        if text in ["✅ Отправить заказ", "🗑 Удалить из заказа", "⭐ Популярные товары", "💾 Сохранить заказ (не отправлять)", "❌ Отмена"]:
             if text == "✅ Отправить заказ":
                 if not user["order_items"]:
                     bot.send_message(chat_id, "⚠️ Заказ пуст, нечего отправлять.")
@@ -1794,46 +1694,6 @@ def handle_any_message(message):
                 user["original_order_count"] = 0
                 user["stage"] = "main"
                 bot.send_message(chat_id, "💾 Заказ сохранён. Чтобы отправить — зайдите в заказ и нажмите «✅ Отправить заказ»", reply_markup=get_main_menu())
-                return
-
-            elif text == "✨ Сделать текст красивее (тест)":
-                # Нормализация названий товаров через fuzzy matching
-                if not user["order_items"]:
-                    bot.send_message(chat_id, "⚠️ Заказ пуст, нечего нормализовать.")
-                    return
-                
-                # Загружаем эталонные названия товаров
-                known_items = load_known_items()
-                if not known_items:
-                    bot.send_message(chat_id, "⚠️ Список эталонных товаров пуст или не найден (known_items.json).")
-                    return
-                
-                # Нормализуем позиции заказа
-                result = normalize_order_items(user["order_items"], known_items)
-                normalized_items = result['normalized_items']
-                changes = result['changes']
-                
-                # Формируем ответное сообщение
-                if not changes:
-                    response = "✅ Все позиции заказа уже имеют правильные названия!\n\n"
-                    response += "📋 Ваш заказ:\n"
-                    for i, item in enumerate(normalized_items, 1):
-                        response += f"{i}. {item}\n"
-                else:
-                    # Обновляем заказ нормализованными позициями
-                    user["order_items"] = normalized_items
-                    
-                    response = f"✨ Нормализация завершена! Исправлено позиций: {len(changes)}\n\n"
-                    response += "🔄 Внесённые исправления:\n"
-                    for change in changes:
-                        similarity = change.get('similarity', 0)
-                        response += f"• «{change['original']}» → «{change['corrected']}» ({similarity:.0f}%)\n"
-                    
-                    response += "\n📋 Обновлённый заказ:\n"
-                    for i, item in enumerate(normalized_items, 1):
-                        response += f"{i}. {item}\n"
-                
-                bot.send_message(chat_id, response, reply_markup=get_order_action_menu())
                 return
 
             elif text == "❌ Отмена":
