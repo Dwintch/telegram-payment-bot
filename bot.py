@@ -122,9 +122,45 @@ DELIVERY_REMINDERS = [
     "🚀 **НАПОМИНАНИЕ:** До старта поставок осталось совсем немного времени!"
 ]
 
+# === ПУЛЫ СООБЩЕНИЙ ДЛЯ УМНЫХ УВЕДОМЛЕНИЙ ===
+
+# Напоминания о составлении отчёта (22:00-23:00)
+REPORT_REMINDERS = [
+    "📝 Не забудь составить отчёт до конца дня! Время летит быстро ⏰",
+    "📄 Отчёт ждёт своего часа! Лучше сделать сейчас, чем потом забыть 😊",
+    "🧾 Как дела с отчётом? Самое время его оформить! 📊",
+    "📋 Отчёт — это важно! Не откладывай на последний момент ⚡"
+]
+
+# Вопросы о missing отчёте (23:00-00:00)  
+REPORT_QUESTIONS = [
+    "А пачемууууу отчета нету???? 😱",
+    "Где отчёт, а? Мы же договаривались! 🤔",
+    "Отчёт испарился что ли? Магия какая-то... 🎭",
+    "Не-не-не, так дело не пойдёт! Где отчётик? 😤"
+]
+
+# Поощрения за ранние заказы (22:00-00:00)
+ORDER_EARLY_ENCOURAGE = [
+    "🌟 Ого! Поздний заказ — это круто! Но в следующий раз попробуй пораньше, будет ещё лучше! 😉",
+    "🎉 Отличная работа! Хотя заказ поздненький, ты молодец! В следующий раз давай пораньше 💪",
+    "⚡ Вау, заказ на ночь глядя! Ты настоящий герой! Но утренние заказы обрабатываются быстрее 🌅",
+    "🏆 Поздний заказ принят! Ты трудяга! Но помни — чем раньше заказ, тем быстрее он в работе 🚀"
+]
+
+# Предупреждения о поздних заказах (09:00-15:00)
+ORDER_LATE_WARNINGS = [
+    "⏰ Заказ принят, но он поздноватый... Может не успеть обработаться сегодня 😔",
+    "📅 М-да, заказик поздненький... Лучше заказывать до 9 утра, так надёжнее! 🌅",
+    "🕘 Заказ в работе, но время позднее... В следующий раз попробуй пораньше! ⚡",
+    "⌚ Поздний заказ — риск не успеть сегодня... Планируй заказы заранее! 📋"
+]
+
 # История последних отправленных сообщений для избежания повторов
 last_motivational_message = None
 last_delivery_message = None
+last_report_reminder_message = None
+last_report_question_message = None
 
 # APScheduler setup
 scheduler = BackgroundScheduler(timezone=pytz.timezone('Europe/Moscow'))
@@ -218,7 +254,7 @@ def log_weather():
 
 def get_random_message_with_no_repeat(message_pool, last_message_var):
     """Получить случайное сообщение, избегая повтора предыдущего"""
-    global last_motivational_message, last_delivery_message
+    global last_motivational_message, last_delivery_message, last_report_reminder_message, last_report_question_message
     
     if len(message_pool) <= 1:
         return message_pool[0] if message_pool else "Сообщение не найдено"
@@ -235,6 +271,10 @@ def get_random_message_with_no_repeat(message_pool, last_message_var):
         last_motivational_message = selected_message
     elif message_pool == DELIVERY_REMINDERS:
         last_delivery_message = selected_message
+    elif message_pool == REPORT_REMINDERS:
+        last_report_reminder_message = selected_message
+    elif message_pool == REPORT_QUESTIONS:
+        last_report_question_message = selected_message
         
     return selected_message
 
@@ -281,6 +321,68 @@ def send_delivery_reminder():
         
     except Exception as e:
         logging.error(f"Ошибка при отправке напоминания о поставке: {e}")
+
+def send_report_reminder():
+    """Отправка напоминания о составлении отчёта всем пользователям (22:00-23:00)"""
+    global last_report_reminder_message
+    
+    try:
+        if not all_bot_users:
+            logging.info("Нет пользователей для отправки напоминаний об отчётах")
+            return
+            
+        message = get_random_message_with_no_repeat(REPORT_REMINDERS, last_report_reminder_message)
+        
+        successful_sends = 0
+        failed_sends = 0
+        
+        for user_id in all_bot_users.copy():  # Используем копию для безопасной итерации
+            try:
+                bot.send_message(user_id, message)
+                successful_sends += 1
+                time.sleep(0.1)  # Небольшая задержка между отправками
+            except Exception as e:
+                failed_sends += 1
+                logging.warning(f"Не удалось отправить напоминание об отчёте пользователю {user_id}: {e}")
+                # Удаляем пользователей, которые заблокировали бота
+                if "bot was blocked" in str(e).lower() or "user is deactivated" in str(e).lower():
+                    all_bot_users.discard(user_id)
+        
+        logging.info(f"Напоминание об отчёте отправлено: {successful_sends} успешно, {failed_sends} ошибок")
+        
+    except Exception as e:
+        logging.error(f"Ошибка при отправке напоминаний об отчёте: {e}")
+
+def send_report_question():
+    """Отправка вопроса о missing отчёте всем пользователям (23:00-00:00)"""
+    global last_report_question_message
+    
+    try:
+        if not all_bot_users:
+            logging.info("Нет пользователей для отправки вопросов об отчётах")
+            return
+            
+        message = get_random_message_with_no_repeat(REPORT_QUESTIONS, last_report_question_message)
+        
+        successful_sends = 0
+        failed_sends = 0
+        
+        for user_id in all_bot_users.copy():  # Используем копию для безопасной итерации
+            try:
+                bot.send_message(user_id, message)
+                successful_sends += 1
+                time.sleep(0.1)  # Небольшая задержка между отправками
+            except Exception as e:
+                failed_sends += 1
+                logging.warning(f"Не удалось отправить вопрос об отчёте пользователю {user_id}: {e}")
+                # Удаляем пользователей, которые заблокировали бота
+                if "bot was blocked" in str(e).lower() or "user is deactivated" in str(e).lower():
+                    all_bot_users.discard(user_id)
+        
+        logging.info(f"Вопрос об отчёте отправлен: {successful_sends} успешно, {failed_sends} ошибок")
+        
+    except Exception as e:
+        logging.error(f"Ошибка при отправке вопросов об отчёте: {e}")
 
 def schedule_random_motivational_reminders():
     """Планирование случайных мотивационных напоминаний в заданных интервалах"""
@@ -377,6 +479,68 @@ def schedule_random_delivery_reminders():
     # Запускаем первоначальное планирование
     schedule_daily_delivery_reminders()
 
+def schedule_random_report_reminders():
+    """Планирование напоминаний об отчётах (22:00-23:00) и вопросов (23:00-00:00)"""
+    
+    def schedule_daily_report_reminders():
+        """Ежедневное планирование напоминаний об отчётах"""
+        # Напоминания об отчётах 22:00-23:00 (до 4 напоминаний)
+        report_reminder_times = []
+        base_time = 22 * 60   # 22:00 в минутах
+        end_time = 23 * 60    # 23:00 в минутах
+        
+        for _ in range(random.randint(1, 4)):  # 1-4 напоминания
+            random_minutes = random.randint(base_time, end_time - 1)
+            hour = random_minutes // 60
+            minute = random_minutes % 60
+            report_reminder_times.append(f"{hour:02d}:{minute:02d}")
+        
+        # Планируем напоминания об отчётах
+        for time_str in report_reminder_times:
+            scheduler.add_job(
+                send_report_reminder,
+                CronTrigger(hour=int(time_str[:2]), minute=int(time_str[3:5])),
+                id=f'report_reminder_{time_str}',
+                replace_existing=True
+            )
+        
+        # Вопросы об отчётах 23:00-00:00 (до 3 вопросов)
+        report_question_times = []
+        base_time = 23 * 60   # 23:00 в минутах  
+        end_time = 24 * 60    # 00:00 в минутах (следующий день)
+        
+        for _ in range(random.randint(1, 3)):  # 1-3 вопроса
+            random_minutes = random.randint(base_time, end_time - 1)
+            hour = random_minutes // 60
+            minute = random_minutes % 60
+            # Обрабатываем переход через полночь
+            if hour >= 24:
+                hour = 0
+            report_question_times.append(f"{hour:02d}:{minute:02d}")
+        
+        # Планируем вопросы об отчётах
+        for time_str in report_question_times:
+            scheduler.add_job(
+                send_report_question,
+                CronTrigger(hour=int(time_str[:2]), minute=int(time_str[3:5])),
+                id=f'report_question_{time_str}',
+                replace_existing=True
+            )
+        
+        logging.info(f"Запланированы напоминания об отчётах: {report_reminder_times}")
+        logging.info(f"Запланированы вопросы об отчётах: {report_question_times}")
+    
+    # Планируем перегенерацию расписания каждый день в 00:03
+    scheduler.add_job(
+        schedule_daily_report_reminders,
+        CronTrigger(hour=0, minute=3),
+        id='regenerate_report_schedule',
+        replace_existing=True
+    )
+    
+    # Запускаем первоначальное планирование
+    schedule_daily_report_reminders()
+
 def add_user_to_tracking(chat_id):
     """Добавить пользователя в отслеживание для напоминаний"""
     if chat_id not in all_bot_users:
@@ -400,6 +564,7 @@ def initialize_reminders():
         setup_weather_monitoring()
         schedule_random_motivational_reminders()
         schedule_random_delivery_reminders()
+        schedule_random_report_reminders()  # Добавлено: умные уведомления для отчётов
         logging.info("✅ Система автоматических напоминаний запущена")
     except Exception as e:
         logging.error(f"❌ Ошибка инициализации напоминаний: {e}")
@@ -1894,6 +2059,32 @@ def send_order(chat_id, appended=False):
     shop_order_messages[shop] = {
         "message_id": order_message.message_id
     }
+
+    # === УМНЫЕ УВЕДОМЛЕНИЯ ДЛЯ ЗАКАЗОВ ===
+    # Проверяем время оформления заказа и отправляем соответствующую реакцию
+    try:
+        from datetime import datetime
+        import pytz
+        
+        # Получаем текущее время в московском часовом поясе
+        moscow_tz = pytz.timezone('Europe/Moscow')
+        current_time = datetime.now(moscow_tz)
+        current_hour = current_time.hour
+        
+        # Поздний заказ (22:00-00:00) - поощрение за работу, но мотивация заказывать раньше
+        if 22 <= current_hour <= 23 or current_hour == 0:
+            encouragement_message = get_random_message_with_no_repeat(ORDER_EARLY_ENCOURAGE, None)
+            bot.send_message(chat_id, encouragement_message)
+            logging.info(f"Отправлено поощрение за поздний заказ пользователю {chat_id}")
+        
+        # Поздний дневной заказ (09:00-15:00) - мягкий упрёк о том, что может не успеть
+        elif 9 <= current_hour <= 15:
+            warning_message = get_random_message_with_no_repeat(ORDER_LATE_WARNINGS, None)
+            bot.send_message(chat_id, warning_message)
+            logging.info(f"Отправлено предупреждение о позднем заказе пользователю {chat_id}")
+            
+    except Exception as e:
+        logging.error(f"Ошибка при отправке умного уведомления для заказа: {e}")
 
     # СОХРАНЯЕМ ЗАКАЗ В ГЛОБАЛЬНЫХ ДАННЫХ МАГАЗИНА
     try:
