@@ -3,8 +3,8 @@ import json
 import logging
 from datetime import datetime
 import threading
-import schedule
 import time
+import random
 
 import telebot
 from telebot import types
@@ -12,6 +12,11 @@ from dotenv import load_dotenv
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import requests  # Для работы с OpenWeather
+
+# APScheduler imports
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import pytz
 
 # === ЗАГРУЗКА .ENV ===
 load_dotenv()
@@ -31,6 +36,67 @@ WEATHER_LOG_FILE = "weather_log.json"
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')
 user_data = {}
+
+# === СИСТЕМА АВТОМАТИЧЕСКИХ НАПОМИНАНИЙ ===
+
+# Хранилище всех пользователей, когда-либо взаимодействовавших с ботом
+all_bot_users = set()
+
+# Пул мотивационных сообщений для пользователей (ЛС)
+MOTIVATIONAL_MESSAGES = [
+    "⏰ Пора сделать заказ! Товары сами себя не закажут 😉",
+    "🛍️ Проверь остатки, иначе товар сбежит! 🏃‍♂️",
+    "📦 Твой магазин ждёт свежий заказ! 🌟",
+    "💰 Время зарабатывать — проверь, что нужно заказать!",
+    "🚀 Заказы не ждут! Проверь остатки и действуй 💪",
+    "⚡ Не дай конкурентам опередить — делай заказ!",
+    "🎯 Успешный день начинается с проверки остатков!",
+    "🔥 Горячие товары ждут твоего заказа!",
+    "📈 Увеличь прибыль — проверь, что заканчивается!",
+    "🌟 Лучшие продавцы всегда на шаг впереди — сделай заказ!",
+    "⭐ Время проверить остатки и удивить клиентов!",
+    "🎪 Магазин без товара — как цирк без клоунов! Заказывай!",
+    "🏆 Чемпионы продаж не забывают про остатки!",
+    "💎 Твои клиенты заслуживают полных полок!",
+    "🌈 После дождичка в четверг заказы делать поздно — делай сейчас!",
+    "🎭 Не играй в прятки с заказами — время действовать!",
+    "🎪 Твой магазин — это представление, а товары — главные актёры!",
+    "🚂 Поезд заказов отправляется — не опоздай!",
+    "🎨 Нарисуй успех — начни с проверки остатков!",
+    "🎵 Мелодия успеха звучит так: заказ-проверка-продажа!"
+]
+
+# Пул сообщений-напоминаний для чата поставок  
+DELIVERY_REMINDERS = [
+    "📦 **НАПОМИНАНИЕ:** Не забудьте собрать заказы до 17:00, после будет тяжело! 💪",
+    "🚀 **НАПОМИНАНИЕ:** Заказы ждут своего героя! Время собирать поставки! ⏰",
+    "⏰ **НАПОМИНАНИЕ:** Время собирать поставки! Клиенты ждут свои товары 📋",
+    "🎯 **НАПОМИНАНИЕ:** До дедлайна остается немного времени — пора в путь! 🚛",
+    "💪 **НАПОМИНАНИЕ:** Богатырская работа по сборке заказов ждёт вас!",
+    "🌟 **НАПОМИНАНИЕ:** Супергерои поставок, ваше время пришло! 🦸‍♂️",
+    "⚡ **НАПОМИНАНИЕ:** Быстрее молнии — только вы при сборке заказов!",
+    "🏆 **НАПОМИНАНИЕ:** Чемпионы поставок, покажите класс!",
+    "🎪 **НАПОМИНАНИЕ:** Главное представление дня — сборка заказов!",
+    "🚂 **НАПОМИНАНИЕ:** Поезд поставок отправляется — все на борт!",
+    "🎭 **НАПОМИНАНИЕ:** Время блистать — заказы не соберут себя сами!",
+    "🌈 **НАПОМИНАНИЕ:** После сборки заказов вас ждёт радуга успеха!",
+    "🎨 **НАПОМИНАНИЕ:** Создайте шедевр из идеально собранных заказов!",
+    "🎵 **НАПОМИНАНИЕ:** Симфония склада играет — дирижёры поставок, за дело!",
+    "🔥 **НАПОМИНАНИЕ:** Горячие заказы остывают — время действовать!",
+    "💎 **НАПОМИНАНИЕ:** Превратите заказы в драгоценности сервиса!",
+    "🎮 **НАПОМИНАНИЕ:** Финальный босс дня — сборка всех заказов!",
+    "🌺 **НАПОМИНАНИЕ:** Каждый заказ — это цветок в букете успеха!",
+    "⭐ **НАПОМИНАНИЕ:** Звёзды поставок, время сиять ярче всех!",
+    "🚀 **НАПОМИНАНИЕ:** До старта поставок осталось совсем немного времени!"
+]
+
+# История последних отправленных сообщений для избежания повторов
+last_motivational_message = None
+last_delivery_message = None
+
+# APScheduler setup
+scheduler = BackgroundScheduler(timezone=pytz.timezone('Europe/Moscow'))
+scheduler.start()
 
 # === ГЛОБАЛЬНОЕ ХРАНИЛИЩЕ ДАННЫХ ПО МАГАЗИНАМ ===
 shop_data = {
@@ -113,15 +179,198 @@ def log_weather():
             except Exception as e:
                 logging.error(f"Ошибка сохранения погоды: {e}")
 
-def weather_monitor_thread():
-    schedule.every(10).minutes.do(log_weather)
-    while True:
-        schedule.run_pending()
-        time.sleep(5)
+# === ФУНКЦИИ АВТОМАТИЧЕСКИХ НАПОМИНАНИЙ ===
 
-# Запуск мониторинга в отдельном потоке
-weather_thread = threading.Thread(target=weather_monitor_thread, daemon=True)
-weather_thread.start()
+def get_random_message_with_no_repeat(message_pool, last_message_var):
+    """Получить случайное сообщение, избегая повтора предыдущего"""
+    global last_motivational_message, last_delivery_message
+    
+    if len(message_pool) <= 1:
+        return message_pool[0] if message_pool else "Сообщение не найдено"
+    
+    available_messages = [msg for msg in message_pool if msg != last_message_var]
+    
+    if not available_messages:
+        available_messages = message_pool
+    
+    selected_message = random.choice(available_messages)
+    
+    # Обновляем соответствующую переменную последнего сообщения
+    if message_pool == MOTIVATIONAL_MESSAGES:
+        last_motivational_message = selected_message
+    elif message_pool == DELIVERY_REMINDERS:
+        last_delivery_message = selected_message
+        
+    return selected_message
+
+def send_motivational_reminder():
+    """Отправка мотивационного напоминания всем пользователям бота"""
+    global last_motivational_message
+    
+    try:
+        if not all_bot_users:
+            logging.info("Нет пользователей для отправки мотивационных напоминаний")
+            return
+            
+        message = get_random_message_with_no_repeat(MOTIVATIONAL_MESSAGES, last_motivational_message)
+        
+        successful_sends = 0
+        failed_sends = 0
+        
+        for user_id in all_bot_users.copy():  # Используем копию для безопасной итерации
+            try:
+                bot.send_message(user_id, message)
+                successful_sends += 1
+                time.sleep(0.1)  # Небольшая задержка между отправками
+            except Exception as e:
+                failed_sends += 1
+                logging.warning(f"Не удалось отправить напоминание пользователю {user_id}: {e}")
+                # Удаляем пользователей, которые заблокировали бота
+                if "bot was blocked" in str(e).lower() or "user is deactivated" in str(e).lower():
+                    all_bot_users.discard(user_id)
+        
+        logging.info(f"Мотивационное напоминание отправлено: {successful_sends} успешно, {failed_sends} ошибок")
+        
+    except Exception as e:
+        logging.error(f"Ошибка при отправке мотивационных напоминаний: {e}")
+
+def send_delivery_reminder():
+    """Отправка напоминания о поставках в чат поставок"""
+    global last_delivery_message
+    
+    try:
+        message = get_random_message_with_no_repeat(DELIVERY_REMINDERS, last_delivery_message)
+        
+        bot.send_message(CHAT_ID_FOR_REPORT, message, message_thread_id=THREAD_ID_FOR_ORDER, parse_mode='Markdown')
+        logging.info(f"Напоминание о поставке отправлено в чат: {message}")
+        
+    except Exception as e:
+        logging.error(f"Ошибка при отправке напоминания о поставке: {e}")
+
+def schedule_random_motivational_reminders():
+    """Планирование случайных мотивационных напоминаний в заданных интервалах"""
+    
+    def schedule_morning_reminders():
+        """Утренние напоминания (10:00-12:00) - до 3 сообщений"""
+        morning_times = []
+        base_time = 10 * 60  # 10:00 в минутах
+        end_time = 12 * 60   # 12:00 в минутах
+        
+        # Генерируем случайные времена для утренних напоминаний
+        for _ in range(random.randint(1, 3)):  # 1-3 сообщения
+            random_minutes = random.randint(base_time, end_time - 1)
+            hour = random_minutes // 60
+            minute = random_minutes % 60
+            morning_times.append(f"{hour:02d}:{minute:02d}")
+        
+        # Планируем каждое напоминание
+        for time_str in morning_times:
+            scheduler.add_job(
+                send_motivational_reminder,
+                CronTrigger(hour=int(time_str[:2]), minute=int(time_str[3:5])),
+                id=f'motivational_morning_{time_str}',
+                replace_existing=True
+            )
+    
+    def schedule_evening_reminders():
+        """Вечерние напоминания (20:00-23:00) - до 3 сообщений"""
+        evening_times = []
+        base_time = 20 * 60  # 20:00 в минутах
+        end_time = 23 * 60   # 23:00 в минутах
+        
+        # Генерируем случайные времена для вечерних напоминаний
+        for _ in range(random.randint(1, 3)):  # 1-3 сообщения
+            random_minutes = random.randint(base_time, end_time - 1)
+            hour = random_minutes // 60
+            minute = random_minutes % 60
+            evening_times.append(f"{hour:02d}:{minute:02d}")
+        
+        # Планируем каждое напоминание
+        for time_str in evening_times:
+            scheduler.add_job(
+                send_motivational_reminder,
+                CronTrigger(hour=int(time_str[:2]), minute=int(time_str[3:5])),
+                id=f'motivational_evening_{time_str}',
+                replace_existing=True
+            )
+    
+    # Планируем перегенерацию расписания каждый день в 00:01
+    scheduler.add_job(
+        lambda: [schedule_morning_reminders(), schedule_evening_reminders()],
+        CronTrigger(hour=0, minute=1),
+        id='regenerate_motivational_schedule',
+        replace_existing=True
+    )
+    
+    # Запускаем первоначальное планирование
+    schedule_morning_reminders()
+    schedule_evening_reminders()
+
+def schedule_random_delivery_reminders():
+    """Планирование случайных напоминаний о поставках (9:00-15:00) - до 4 напоминаний в день"""
+    
+    def schedule_daily_delivery_reminders():
+        """Ежедневное планирование напоминаний о поставках"""
+        delivery_times = []
+        base_time = 9 * 60   # 09:00 в минутах
+        end_time = 15 * 60   # 15:00 в минутах
+        
+        # Генерируем случайные времена для напоминаний о поставках
+        for _ in range(random.randint(1, 4)):  # 1-4 сообщения
+            random_minutes = random.randint(base_time, end_time - 1)
+            hour = random_minutes // 60
+            minute = random_minutes % 60
+            delivery_times.append(f"{hour:02d}:{minute:02d}")
+        
+        # Планируем каждое напоминание
+        for time_str in delivery_times:
+            scheduler.add_job(
+                send_delivery_reminder,
+                CronTrigger(hour=int(time_str[:2]), minute=int(time_str[3:5])),
+                id=f'delivery_reminder_{time_str}',
+                replace_existing=True
+            )
+    
+    # Планируем перегенерацию расписания каждый день в 00:02
+    scheduler.add_job(
+        schedule_daily_delivery_reminders,
+        CronTrigger(hour=0, minute=2),
+        id='regenerate_delivery_schedule',
+        replace_existing=True
+    )
+    
+    # Запускаем первоначальное планирование
+    schedule_daily_delivery_reminders()
+
+def add_user_to_tracking(chat_id):
+    """Добавить пользователя в отслеживание для напоминаний"""
+    if chat_id not in all_bot_users:
+        all_bot_users.add(chat_id)
+        logging.info(f"Пользователь {chat_id} добавлен в систему напоминаний")
+
+# Заменяем старую систему мониторинга погоды на APScheduler
+def setup_weather_monitoring():
+    """Настройка мониторинга погоды через APScheduler"""
+    scheduler.add_job(
+        log_weather,
+        CronTrigger(minute='*/10'),  # Каждые 10 минут
+        id='weather_monitoring',
+        replace_existing=True
+    )
+
+# Инициализация всех напоминаний
+def initialize_reminders():
+    """Инициализация системы напоминаний"""
+    try:
+        setup_weather_monitoring()
+        schedule_random_motivational_reminders()
+        schedule_random_delivery_reminders()
+        logging.info("✅ Система автоматических напоминаний запущена")
+    except Exception as e:
+        logging.error(f"❌ Ошибка инициализации напоминаний: {e}")
+
+# Запускаем систему напоминаний
+initialize_reminders()
 
 def get_weather_condition_emoji(weather_main, weather_desc):
     """Get weather emoji based on weather condition"""
@@ -455,6 +704,10 @@ def get_popular_items_keyboard():
 @bot.message_handler(content_types=['photo', 'video'])
 def handle_media(message):
     chat_id = message.chat.id
+    
+    # Добавляем пользователя в систему отслеживания для напоминаний
+    add_user_to_tracking(chat_id)
+    
     user = user_data.get(chat_id)
     caption = message.caption or ""
     if not user:
@@ -487,6 +740,10 @@ def handle_media(message):
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
+    
+    # Добавляем пользователя в систему отслеживания для напоминаний
+    add_user_to_tracking(chat_id)
+    
     user_data[chat_id] = {
         # === ТОЛЬКО UI СОСТОЯНИЕ И ВРЕМЕННЫЕ ДАННЫЕ СЕССИИ ===
         "shop": None,  # Выбранный магазин для отчетов
@@ -511,6 +768,28 @@ def start(message):
         "temp_shop": None  # Временное хранилище магазина для популярных товаров после отправки заказа
     }
     bot.send_message(chat_id, "Привет! Выберите магазин для переводов:", reply_markup=get_shop_menu())
+
+@bot.message_handler(commands=['test_reminder'])
+def test_reminders(message):
+    """Команда для тестирования системы напоминаний (только для отладки)"""
+    chat_id = message.chat.id
+    add_user_to_tracking(chat_id)
+    
+    try:
+        # Тест мотивационного напоминания
+        send_motivational_reminder()
+        bot.send_message(chat_id, "✅ Тестовое мотивационное напоминание отправлено всем пользователям")
+        
+        # Тест напоминания о поставке
+        send_delivery_reminder() 
+        bot.send_message(chat_id, "✅ Тестовое напоминание о поставке отправлено в чат")
+        
+        # Информация о пользователях
+        bot.send_message(chat_id, f"📊 Всего пользователей в системе напоминаний: {len(all_bot_users)}")
+        
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Ошибка тестирования напоминаний: {e}")
+        logging.error(f"Ошибка тестирования напоминаний: {e}")
 
 @bot.message_handler(func=lambda m: m.text in ["Янтарь", "Хайп", "Полка", "⬅️ Назад"])
 def choose_shop(message):
@@ -738,6 +1017,10 @@ def choose_shop(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('popular_'))
 def handle_popular_items_callback(call):
     chat_id = call.message.chat.id
+    
+    # Добавляем пользователя в систему отслеживания для напоминаний  
+    add_user_to_tracking(chat_id)
+    
     user = user_data.get(chat_id)
     current_stage = user.get('stage') if user else None
     
@@ -830,6 +1113,10 @@ def handle_popular_items_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('remove_'))
 def handle_order_removal_callback(call):
     chat_id = call.message.chat.id
+    
+    # Добавляем пользователя в систему отслеживания для напоминаний
+    add_user_to_tracking(chat_id)
+    
     user = user_data.get(chat_id)
     if not user or user.get('stage') != 'order_removal':
         bot.answer_callback_query(call.id, "❌ Сессия истекла")
@@ -933,6 +1220,10 @@ def handle_order_removal_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('staff_'))
 def handle_staff_callback(call):
     chat_id = call.message.chat.id
+    
+    # Добавляем пользователя в систему отслеживания для напоминаний
+    add_user_to_tracking(chat_id)
+    
     user = user_data.get(chat_id)
     if not user or user.get('stage') != 'choose_staff':
         bot.answer_callback_query(call.id)
@@ -957,6 +1248,10 @@ def handle_staff_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('delivery_'))
 def handle_delivery_callback(call):
     chat_id = call.message.chat.id
+    
+    # Добавляем пользователя в систему отслеживания для напоминаний
+    add_user_to_tracking(chat_id)
+    
     user = user_data.get(chat_id)
     if not user or user.get('stage') != 'delivery_buttons':
         bot.answer_callback_query(call.id, "❌ Сессия истекла")
@@ -1072,6 +1367,9 @@ def handle_any_message(message):
     chat_id = message.chat.id
     text = message.text.strip()
     user = user_data.get(chat_id)
+
+    # Добавляем пользователя в систему отслеживания для напоминаний
+    add_user_to_tracking(chat_id)
 
     if not user:
         start(message)
