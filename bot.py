@@ -135,17 +135,20 @@ shop_data = {
     "Янтарь": {
         "last_order": [],
         "pending_delivery": [],
-        "accepted_delivery": []
+        "accepted_delivery": [],
+        "transfers": []  # Переводы для магазина
     },
     "Хайп": {
         "last_order": [],
         "pending_delivery": [],
-        "accepted_delivery": []
+        "accepted_delivery": [],
+        "transfers": []  # Переводы для магазина
     },
     "Полка": {
         "last_order": [],
         "pending_delivery": [],
-        "accepted_delivery": []
+        "accepted_delivery": [],
+        "transfers": []  # Переводы для магазина
     }
 }
 
@@ -780,7 +783,7 @@ def start(message):
         # === ТОЛЬКО UI СОСТОЯНИЕ И ВРЕМЕННЫЕ ДАННЫЕ СЕССИИ ===
         "shop": None,  # Выбранный магазин для отчетов
         "order_shop": None,  # Выбранный магазин для заказов (временно во время сессии)
-        "transfers": [],  # Переводы для отчета
+        "transfers": [],  # УСТАРЕВШЕЕ: переводы теперь хранятся в shop_data, но оставлено для совместимости
         "mode": "add",  # Режим добавления/вычитания переводов
         "cash": 0,  # Наличные для отчета
         "terminal": 0,  # Терминал для отчета
@@ -849,7 +852,7 @@ def choose_shop(message):
         user_data[chat_id] = user or {}
         user_data[chat_id].update({
             "shop": message.text,
-            "transfers": [],
+            "transfers": [],  # УСТАРЕВШЕЕ: переводы теперь хранятся в shop_data, но оставлено для совместимости
             "mode": "add",
             "cash": 0,
             "terminal": 0,
@@ -1592,32 +1595,46 @@ def handle_any_message(message):
         return
 
     if text == "👀 Посмотреть сумму":
-        total = sum(user["transfers"])
-        count = len(user["transfers"])
-        bot.send_message(chat_id, f"📊 Сумма переводов: <b>{total}₽</b>\nКол-во транзакций: {count}")
+        shop = user.get("shop")
+        if shop in shop_data:
+            total = sum(shop_data[shop]["transfers"])
+            count = len(shop_data[shop]["transfers"])
+            bot.send_message(chat_id, f"📊 Сумма переводов по магазину {shop}: <b>{total}₽</b>\nКол-во транзакций: {count}")
+        else:
+            bot.send_message(chat_id, "⚠️ Магазин не выбран")
         return
 
     if text == "📄 Составить отчёт":
         user["stage"] = "cash_input"
-        total = sum(user["transfers"])
-        bot.send_message(chat_id, f"🧾 Переводов на сумму: <b>{total}₽</b>\nВведите сумму наличных:")
+        shop = user.get("shop")
+        if shop in shop_data:
+            total = sum(shop_data[shop]["transfers"])
+            bot.send_message(chat_id, f"🧾 Переводов на сумму: <b>{total}₽</b>\nВведите сумму наличных:")
+        else:
+            bot.send_message(chat_id, "⚠️ Магазин не выбран")
         return
 
     if text.isdigit():
         amount = int(text)
         stage = user.get("stage", "main")
         if stage == "main" and user.get("shop"):
-            user["transfers"].append(amount)
-            bot.send_message(chat_id, f"✅ Добавлено: {amount}₽")
-            total = sum(user["transfers"])
-            bot.send_message(chat_id, f"💰 Текущая сумма: <b>{total}₽</b>", reply_markup=get_main_menu())
+            # Добавляем перевод к данным магазина, а не пользователя
+            shop = user.get("shop")
+            if shop in shop_data:
+                shop_data[shop]["transfers"].append(amount)
+                bot.send_message(chat_id, f"✅ Добавлено: {amount}₽")
+                total = sum(shop_data[shop]["transfers"])
+                bot.send_message(chat_id, f"💰 Текущая сумма по магазину {shop}: <b>{total}₽</b>", reply_markup=get_main_menu())
             return
 
         if stage == "amount_input":
-            user["transfers"].append(-amount if user["mode"] == "subtract" else amount)
-            bot.send_message(chat_id, f"{'➖ Возврат' if user['mode']=='subtract' else '✅ Добавлено'}: {amount}₽")
-            total = sum(user["transfers"])
-            bot.send_message(chat_id, f"💰 Текущая сумма: <b>{total}₽</b>", reply_markup=get_main_menu())
+            # Добавляем перевод к данным магазина при использовании кнопок "Перевод"/"Возврат"
+            shop = user.get("shop")
+            if shop in shop_data:
+                shop_data[shop]["transfers"].append(-amount if user["mode"] == "subtract" else amount)
+                bot.send_message(chat_id, f"{'➖ Возврат' if user['mode']=='subtract' else '✅ Добавлено'}: {amount}₽")
+                total = sum(shop_data[shop]["transfers"])
+                bot.send_message(chat_id, f"💰 Текущая сумма по магазину {shop}: <b>{total}₽</b>", reply_markup=get_main_menu())
             user["mode"] = "add"
             user["stage"] = "main"
             return
@@ -1638,7 +1655,10 @@ def handle_any_message(message):
     if user.get("stage") == "confirm_report":
         if text == "✅ Отправить":
             send_report(chat_id)
-            user["transfers"] = []
+            # Очищаем переводы из данных магазина после отправки отчёта
+            shop = user.get("shop")
+            if shop in shop_data:
+                shop_data[shop]["transfers"] = []
             user["cash"] = 0
             user["terminal"] = 0
             user["selected_staff"] = []
@@ -1674,7 +1694,8 @@ def handle_any_message(message):
 def preview_report(chat_id):
     data = user_data[chat_id]
     shop = data["shop"]
-    transfers = sum(data["transfers"])
+    # Используем переводы из данных магазина
+    transfers = sum(shop_data[shop]["transfers"]) if shop in shop_data else 0
     cash = data["cash"]
     terminal = data["terminal"]
     total = transfers + cash + terminal
@@ -1714,7 +1735,8 @@ def preview_report(chat_id):
 def send_report(chat_id):
     data = user_data[chat_id]
     shop = data["shop"]
-    transfers = sum(data["transfers"])
+    # Используем переводы из данных магазина
+    transfers = sum(shop_data[shop]["transfers"]) if shop in shop_data else 0
     cash = data["cash"]
     terminal = data["terminal"]
     date = data["date"]
