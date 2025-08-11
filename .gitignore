@@ -3,6 +3,8 @@ credentials.json
 .env
 __pycache__/
 venv/
+# Test files
+test_reminders.py
 # Byte-compiled / optimized / DLL files
 
 *.py[codz]
