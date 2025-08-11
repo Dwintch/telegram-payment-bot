@@ -58,7 +58,7 @@ from dotenv import load_dotenv
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import requests  # Для работы с OpenWeather
-from rapidfuzz import fuzz  # Для нормализации названий товаров
+from rapidfuzz import fuzz, process  # Для нормализации названий товаров
 
 # APScheduler imports
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -660,7 +660,7 @@ def load_known_items():
         logging.warning(f"Не удалось загрузить known_items.json: {e}")
         return []
 
-def normalize_order_items(order_items, known_items, threshold=80):
+def normalize_order_items(order_items, known_items, threshold=75):
     """
     Нормализует названия товаров в заказе через fuzzy matching с эталонными названиями.
     
@@ -682,22 +682,44 @@ def normalize_order_items(order_items, known_items, threshold=80):
     changes = []
     
     for item in order_items:
+        # Пробуем разные алгоритмы для поиска лучшего совпадения
+        token_sort_match = process.extractOne(item, known_items, scorer=fuzz.token_sort_ratio, score_cutoff=threshold)
+        token_set_match = process.extractOne(item, known_items, scorer=fuzz.token_set_ratio, score_cutoff=threshold)
+        
+        # Для partial_ratio требуем более высокий порог и дополнительную проверку
+        partial_match = process.extractOne(item, known_items, scorer=fuzz.partial_ratio, score_cutoff=threshold+5)
+        
+        # Также проверяем обычное ratio для фильтрации ложных срабатываний
+        ratio_match = process.extractOne(item, known_items, scorer=fuzz.ratio, score_cutoff=50)
+        
+        # Собираем все валидные совпадения
+        valid_matches = []
+        
+        # token-based matches проходят без дополнительных проверок
+        if token_sort_match:
+            valid_matches.append(token_sort_match)
+        if token_set_match:
+            valid_matches.append(token_set_match)
+            
+        # partial match проходит только если ratio тоже приемлемый
+        if partial_match and ratio_match and ratio_match[0] == partial_match[0]:
+            # Требуем чтобы ratio был не менее 50% для partial matches
+            if ratio_match[1] >= 50:
+                valid_matches.append(partial_match)
+        
+        # Выбираем лучший результат из валидных совпадений
         best_match = None
-        best_ratio = 0
+        for match in valid_matches:
+            if match and (not best_match or match[1] > best_match[1]):
+                best_match = match
         
-        # Ищем лучшее совпадение среди эталонных названий
-        for known_item in known_items:
-            ratio = fuzz.ratio(item.lower(), known_item.lower())
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_match = known_item
-        
-        # Если найдено достаточно хорошее совпадение, используем эталонное название
-        if best_ratio >= threshold and best_match != item:
-            normalized_items.append(best_match)
+        if best_match and best_match[0] != item:
+            # best_match[0] - найденный текст, best_match[1] - рейтинг
+            normalized_items.append(best_match[0])
             changes.append({
                 'original': item,
-                'corrected': best_match
+                'corrected': best_match[0],
+                'similarity': best_match[1]
             })
         else:
             normalized_items.append(item)
@@ -1804,7 +1826,8 @@ def handle_any_message(message):
                     response = f"✨ Нормализация завершена! Исправлено позиций: {len(changes)}\n\n"
                     response += "🔄 Внесённые исправления:\n"
                     for change in changes:
-                        response += f"• «{change['original']}» → «{change['corrected']}»\n"
+                        similarity = change.get('similarity', 0)
+                        response += f"• «{change['original']}» → «{change['corrected']}» ({similarity:.0f}%)\n"
                     
                     response += "\n📋 Обновлённый заказ:\n"
                     for i, item in enumerate(normalized_items, 1):
