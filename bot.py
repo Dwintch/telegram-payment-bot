@@ -199,6 +199,13 @@ item_statistics = {}
 # === СПИСОК СОТРУДНИКОВ ===
 STAFF_LIST = ["Данил", "Даниз", "Даша", "Соня", "Оксана", "Лиза"]
 
+# === ТРЕКИНГ ДНЕВНЫХ ЛИМИТОВ ===
+# Структура: {"YYYY-MM-DD": {"notifications": {"order_id": [shop1, shop2, ...]}, "reports": {"order_id": count}}}
+daily_limits = {}
+
+# === ФАЙЛЫ ПЕРСИСТЕНТНОСТИ ===
+PERSISTENCE_FILE = "bot_data.json"
+
 # === GOOGLE SHEETS ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
@@ -250,6 +257,156 @@ def log_weather():
                     json.dump(weather_log, f)
             except Exception as e:
                 logging.error(f"Ошибка сохранения погоды: {e}")
+
+# === ФУНКЦИИ ПЕРСИСТЕНТНОСТИ ===
+def save_data():
+    """Сохранить данные бота в файл"""
+    try:
+        data = {
+            "shop_data": shop_data,
+            "all_bot_users": list(all_bot_users),
+            "daily_limits": daily_limits,
+            "item_statistics": item_statistics,
+            "shop_order_messages": shop_order_messages
+        }
+        with open(PERSISTENCE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        logging.info("Данные бота сохранены")
+    except Exception as e:
+        logging.error(f"Ошибка сохранения данных бота: {e}")
+
+def load_data():
+    """Загрузить данные бота из файла"""
+    global shop_data, all_bot_users, daily_limits, item_statistics, shop_order_messages
+    
+    try:
+        if os.path.exists(PERSISTENCE_FILE):
+            with open(PERSISTENCE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                
+            # Загружаем данные магазинов
+            if "shop_data" in data:
+                shop_data.update(data["shop_data"])
+            
+            # Загружаем пользователей
+            if "all_bot_users" in data:
+                all_bot_users.update(set(data["all_bot_users"]))
+            
+            # Загружаем дневные лимиты
+            if "daily_limits" in data:
+                daily_limits.update(data["daily_limits"])
+            
+            # Загружаем статистику товаров
+            if "item_statistics" in data:
+                item_statistics.update(data["item_statistics"])
+                
+            # Загружаем сообщения заказов
+            if "shop_order_messages" in data:
+                shop_order_messages.update(data["shop_order_messages"])
+                
+            logging.info("Данные бота восстановлены из файла")
+        else:
+            logging.info("Файл данных не найден, начинаем с чистого состояния")
+    except Exception as e:
+        logging.error(f"Ошибка загрузки данных бота: {e}")
+
+def cleanup_old_daily_limits():
+    """Очистить старые записи дневных лимитов (старше 7 дней)"""
+    try:
+        current_date = datetime.now().date()
+        dates_to_remove = []
+        
+        for date_str in daily_limits.keys():
+            try:
+                date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+                if (current_date - date_obj).days > 7:
+                    dates_to_remove.append(date_str)
+            except ValueError:
+                dates_to_remove.append(date_str)  # Некорректный формат даты
+        
+        for date_str in dates_to_remove:
+            del daily_limits[date_str]
+        
+        if dates_to_remove:
+            logging.info(f"Удалены старые записи дневных лимитов: {len(dates_to_remove)} дат")
+            save_data()  # Сохраняем изменения
+            
+    except Exception as e:
+        logging.error(f"Ошибка очистки старых дневных лимитов: {e}")
+
+# === ФУНКЦИИ ПРОВЕРКИ ДНЕВНЫХ ЛИМИТОВ ===
+def can_send_shop_notification(order_id, shop_name):
+    """Проверить, можно ли отправить уведомление для заказа от данного магазина"""
+    today = datetime.now().date().strftime("%Y-%m-%d")
+    
+    if today not in daily_limits:
+        daily_limits[today] = {"notifications": {}, "reports": {}}
+    
+    if order_id not in daily_limits[today]["notifications"]:
+        daily_limits[today]["notifications"][order_id] = []
+    
+    # Проверяем, не достигнут ли лимит в 3 магазина для данного заказа
+    shop_list = daily_limits[today]["notifications"][order_id]
+    if len(shop_list) >= 3:
+        return False
+    
+    # Проверяем, не отправляли ли уже от этого магазина для данного заказа
+    if shop_name in shop_list:
+        return False
+        
+    return True
+
+def record_shop_notification(order_id, shop_name):
+    """Записать отправку уведомления для заказа от данного магазина"""
+    today = datetime.now().date().strftime("%Y-%m-%d")
+    
+    if today not in daily_limits:
+        daily_limits[today] = {"notifications": {}, "reports": {}}
+    
+    if order_id not in daily_limits[today]["notifications"]:
+        daily_limits[today]["notifications"][order_id] = []
+    
+    if shop_name not in daily_limits[today]["notifications"][order_id]:
+        daily_limits[today]["notifications"][order_id].append(shop_name)
+        save_data()  # Сохраняем изменения
+
+def can_send_report_request(order_id):
+    """Проверить, можно ли отправить запрос отчета для данного заказа"""
+    today = datetime.now().date().strftime("%Y-%m-%d")
+    
+    if today not in daily_limits:
+        daily_limits[today] = {"notifications": {}, "reports": {}}
+    
+    report_count = daily_limits[today]["reports"].get(order_id, 0)
+    return report_count < 3
+
+def record_report_request(order_id):
+    """Записать отправку запроса отчета для данного заказа"""
+    today = datetime.now().date().strftime("%Y-%m-%d")
+    
+    if today not in daily_limits:
+        daily_limits[today] = {"notifications": {}, "reports": {}}
+    
+    if order_id not in daily_limits[today]["reports"]:
+        daily_limits[today]["reports"][order_id] = 0
+    
+    daily_limits[today]["reports"][order_id] += 1
+    save_data()  # Сохраняем изменения
+
+def is_report_time_valid():
+    """Проверить, можно ли сейчас отправлять напоминания об отчетах (22:00-23:10)"""
+    moscow_tz = pytz.timezone('Europe/Moscow')
+    current_time = datetime.now(moscow_tz)
+    current_hour = current_time.hour
+    current_minute = current_time.minute
+    
+    # 22:00-23:10
+    if current_hour == 22:
+        return True
+    elif current_hour == 23 and current_minute <= 10:
+        return True
+    else:
+        return False
 
 # === ФУНКЦИИ АВТОМАТИЧЕСКИХ НАПОМИНАНИЙ ===
 
@@ -324,10 +481,15 @@ def send_delivery_reminder():
         logging.error(f"Ошибка при отправке напоминания о поставке: {e}")
 
 def send_report_reminder():
-    """Отправка напоминания о составлении отчёта всем пользователям (22:00-23:00)"""
+    """Отправка напоминания о составлении отчёта всем пользователям (22:00-23:10)"""
     global last_report_reminder_message
     
     try:
+        # Проверяем временное окно для отправки напоминаний об отчетах
+        if not is_report_time_valid():
+            logging.info("Напоминание об отчёте пропущено - вне временного окна (22:00-23:10)")
+            return
+            
         if not all_bot_users:
             logging.info("Нет пользователей для отправки напоминаний об отчётах")
             return
@@ -339,9 +501,15 @@ def send_report_reminder():
         
         for user_id in all_bot_users.copy():  # Используем копию для безопасной итерации
             try:
-                bot.send_message(user_id, message)
-                successful_sends += 1
-                time.sleep(0.1)  # Небольшая задержка между отправками
+                # Проверяем дневной лимит для отправки запросов отчетов
+                # Используем user_id как order_id для простоты
+                if can_send_report_request(f"user_{user_id}"):
+                    bot.send_message(user_id, message)
+                    record_report_request(f"user_{user_id}")
+                    successful_sends += 1
+                    time.sleep(0.1)  # Небольшая задержка между отправками
+                else:
+                    logging.info(f"Пропущено напоминание об отчёте для пользователя {user_id} - достигнут дневной лимит")
             except Exception as e:
                 failed_sends += 1
                 logging.warning(f"Не удалось отправить напоминание об отчёте пользователю {user_id}: {e}")
@@ -481,14 +649,14 @@ def schedule_random_delivery_reminders():
     schedule_daily_delivery_reminders()
 
 def schedule_random_report_reminders():
-    """Планирование напоминаний об отчётах (22:00-23:00) и вопросов (23:00-00:00)"""
+    """Планирование напоминаний об отчётах (22:00-23:10) и вопросов (23:00-00:00)"""
     
     def schedule_daily_report_reminders():
         """Ежедневное планирование напоминаний об отчётах"""
-        # Напоминания об отчётах 22:00-23:00 (до 4 напоминаний)
+        # Напоминания об отчётах 22:00-23:10 (до 4 напоминаний)
         report_reminder_times = []
         base_time = 22 * 60   # 22:00 в минутах
-        end_time = 23 * 60    # 23:00 в минутах
+        end_time = 23 * 60 + 10    # 23:10 в минутах
         
         for _ in range(random.randint(1, 4)):  # 1-4 напоминания
             random_minutes = random.randint(base_time, end_time - 1)
@@ -547,6 +715,7 @@ def add_user_to_tracking(chat_id):
     if chat_id not in all_bot_users:
         all_bot_users.add(chat_id)
         logging.info(f"Пользователь {chat_id} добавлен в систему напоминаний")
+        save_data()  # Сохраняем изменения
 
 # Заменяем старую систему мониторинга погоды на APScheduler
 def setup_weather_monitoring():
@@ -569,6 +738,17 @@ def initialize_reminders():
         logging.info("✅ Система автоматических напоминаний запущена")
     except Exception as e:
         logging.error(f"❌ Ошибка инициализации напоминаний: {e}")
+
+# Загружаем данные при запуске
+load_data()
+
+# Запускаем очистку старых данных ежедневно в 00:05
+scheduler.add_job(
+    cleanup_old_daily_limits,
+    CronTrigger(hour=0, minute=5),
+    id='cleanup_daily_limits',
+    replace_existing=True
+)
 
 # Запускаем систему напоминаний
 initialize_reminders()
@@ -1488,6 +1668,7 @@ def handle_delivery_callback(call):
         try:
             shop_info["accepted_delivery"].extend(arrived_items)
             shop_info["pending_delivery"] = not_arrived.copy()
+            save_data()  # Сохраняем изменения
         except Exception as e:
             bot.answer_callback_query(call.id, "❌ Ошибка обновления данных")
             logging.error(f"Ошибка обновления данных магазина {shop}: {e}")
@@ -1791,6 +1972,7 @@ def handle_any_message(message):
                 bot.send_message(chat_id, f"✅ Добавлено: {amount}₽")
                 total = sum(shop_data[shop]["transfers"])
                 bot.send_message(chat_id, f"💰 Текущая сумма по магазину {shop}: <b>{total}₽</b>", reply_markup=get_main_menu())
+                save_data()  # Сохраняем изменения
             return
 
         if stage == "amount_input":
@@ -1801,6 +1983,7 @@ def handle_any_message(message):
                 bot.send_message(chat_id, f"{'➖ Возврат' if user['mode']=='subtract' else '✅ Добавлено'}: {amount}₽")
                 total = sum(shop_data[shop]["transfers"])
                 bot.send_message(chat_id, f"💰 Текущая сумма по магазину {shop}: <b>{total}₽</b>", reply_markup=get_main_menu())
+                save_data()  # Сохраняем изменения
             user["mode"] = "add"
             user["stage"] = "main"
             return
@@ -1829,6 +2012,7 @@ def handle_any_message(message):
             user["terminal"] = 0
             user["selected_staff"] = []
             user["stage"] = "choose_shop"
+            save_data()  # Сохраняем изменения
             bot.send_message(chat_id, "✅ Отчёт отправлен! Выберите магазин для переводов:", reply_markup=get_shop_menu())
             return
         elif text == "✏️ Изменить данные":
@@ -2096,6 +2280,18 @@ def send_order(chat_id, appended=False):
         accepted_items = shop_data[shop]["accepted_delivery"]
         new_pending_items = [item for item in items if item not in accepted_items and not is_photo_related_item(item)]
         shop_data[shop]["pending_delivery"] = new_pending_items
+        
+        # Записываем уведомление для магазина с проверкой дневного лимита
+        order_id = f"shop_{shop}_{datetime.now().strftime('%Y%m%d')}"
+        if can_send_shop_notification(order_id, shop):
+            record_shop_notification(order_id, shop)
+            logging.info(f"Зафиксировано уведомление от магазина {shop} для заказа {order_id}")
+        else:
+            logging.info(f"Лимит уведомлений (3 магазина в день) достигнут для заказа {order_id}")
+        
+        # Сохраняем изменения данных
+        save_data()
+        
     except Exception as e:
         logging.error(f"Ошибка сохранения данных заказа для магазина {shop}: {e}")
         # Continue execution as this is not critical for order delivery

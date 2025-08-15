@@ -5,6 +5,9 @@ __pycache__/
 venv/
 # Test files
 test_reminders.py
+# Persistence files
+bot_data.json
+weather_log.json
 # Byte-compiled / optimized / DLL files
 
 *.py[codz]
