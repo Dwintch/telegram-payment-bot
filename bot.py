@@ -613,7 +613,11 @@ def schedule_random_motivational_reminders():
     schedule_evening_reminders()
 
 def schedule_random_delivery_reminders():
-    """Планирование случайных напоминаний о поставках (9:00-15:00) - до 4 напоминаний в день"""
+    """Планирование случайных напоминаний о поставках (9:00-15:00) - до 4 напоминаний в день
+    
+    ВНИМАНИЕ: Напоминания о поставках временно отключены!
+    Для включения раскомментируйте строки с scheduler.add_job ниже.
+    """
     
     def schedule_daily_delivery_reminders():
         """Ежедневное планирование напоминаний о поставках"""
@@ -628,28 +632,35 @@ def schedule_random_delivery_reminders():
             minute = random_minutes % 60
             delivery_times.append(f"{hour:02d}:{minute:02d}")
         
-        # Планируем каждое напоминание
-        for time_str in delivery_times:
-            scheduler.add_job(
-                send_delivery_reminder,
-                CronTrigger(hour=int(time_str[:2]), minute=int(time_str[3:5])),
-                id=f'delivery_reminder_{time_str}',
-                replace_existing=True
-            )
+        # ВРЕМЕННО ОТКЛЮЧЕНО: Планируем каждое напоминание
+        # Для включения раскомментируйте блок ниже:
+        # for time_str in delivery_times:
+        #     scheduler.add_job(
+        #         send_delivery_reminder,
+        #         CronTrigger(hour=int(time_str[:2]), minute=int(time_str[3:5])),
+        #         id=f'delivery_reminder_{time_str}',
+        #         replace_existing=True
+        #     )
     
-    # Планируем перегенерацию расписания каждый день в 00:02
-    scheduler.add_job(
-        schedule_daily_delivery_reminders,
-        CronTrigger(hour=0, minute=2),
-        id='regenerate_delivery_schedule',
-        replace_existing=True
-    )
+    # ВРЕМЕННО ОТКЛЮЧЕНО: Планируем перегенерацию расписания каждый день в 00:02
+    # Для включения раскомментируйте блок ниже:
+    # scheduler.add_job(
+    #     schedule_daily_delivery_reminders,
+    #     CronTrigger(hour=0, minute=2),
+    #     id='regenerate_delivery_schedule',
+    #     replace_existing=True
+    # )
     
-    # Запускаем первоначальное планирование
-    schedule_daily_delivery_reminders()
+    # ВРЕМЕННО ОТКЛЮЧЕНО: Запускаем первоначальное планирование
+    # Для включения раскомментируйте строку ниже:
+    # schedule_daily_delivery_reminders()
 
 def schedule_random_report_reminders():
-    """Планирование напоминаний об отчётах (22:00-23:10) и вопросов (23:00-00:00)"""
+    """Планирование напоминаний об отчётах (22:00-23:10) и вопросов (23:00-00:00)
+    
+    ВНИМАНИЕ: Напоминания об отчётах временно отключены!
+    Для включения раскомментируйте строки с scheduler.add_job ниже.
+    """
     
     def schedule_daily_report_reminders():
         """Ежедневное планирование напоминаний об отчётах"""
@@ -664,14 +675,15 @@ def schedule_random_report_reminders():
             minute = random_minutes % 60
             report_reminder_times.append(f"{hour:02d}:{minute:02d}")
         
-        # Планируем напоминания об отчётах
-        for time_str in report_reminder_times:
-            scheduler.add_job(
-                send_report_reminder,
-                CronTrigger(hour=int(time_str[:2]), minute=int(time_str[3:5])),
-                id=f'report_reminder_{time_str}',
-                replace_existing=True
-            )
+        # ВРЕМЕННО ОТКЛЮЧЕНО: Планируем напоминания об отчётах
+        # Для включения раскомментируйте блок ниже:
+        # for time_str in report_reminder_times:
+        #     scheduler.add_job(
+        #         send_report_reminder,
+        #         CronTrigger(hour=int(time_str[:2]), minute=int(time_str[3:5])),
+        #         id=f'report_reminder_{time_str}',
+        #         replace_existing=True
+        #     )
         
         # Вопросы об отчётах 23:00-00:00 (до 3 вопросов)
         report_question_times = []
@@ -687,28 +699,31 @@ def schedule_random_report_reminders():
                 hour = 0
             report_question_times.append(f"{hour:02d}:{minute:02d}")
         
-        # Планируем вопросы об отчётах
-        for time_str in report_question_times:
-            scheduler.add_job(
-                send_report_question,
-                CronTrigger(hour=int(time_str[:2]), minute=int(time_str[3:5])),
-                id=f'report_question_{time_str}',
-                replace_existing=True
-            )
+        # ВРЕМЕННО ОТКЛЮЧЕНО: Планируем вопросы об отчётах
+        # Для включения раскомментируйте блок ниже:
+        # for time_str in report_question_times:
+        #     scheduler.add_job(
+        #         send_report_question,
+        #         CronTrigger(hour=int(time_str[:2]), minute=int(time_str[3:5])),
+        #         id=f'report_question_{time_str}',
+        #         replace_existing=True
+        #     )
         
         logging.info(f"Запланированы напоминания об отчётах: {report_reminder_times}")
         logging.info(f"Запланированы вопросы об отчётах: {report_question_times}")
     
-    # Планируем перегенерацию расписания каждый день в 00:03
-    scheduler.add_job(
-        schedule_daily_report_reminders,
-        CronTrigger(hour=0, minute=3),
-        id='regenerate_report_schedule',
-        replace_existing=True
-    )
+    # ВРЕМЕННО ОТКЛЮЧЕНО: Планируем перегенерацию расписания каждый день в 00:03
+    # Для включения раскомментируйте блок ниже:
+    # scheduler.add_job(
+    #     schedule_daily_report_reminders,
+    #     CronTrigger(hour=0, minute=3),
+    #     id='regenerate_report_schedule',
+    #     replace_existing=True
+    # )
     
-    # Запускаем первоначальное планирование
-    schedule_daily_report_reminders()
+    # ВРЕМЕННО ОТКЛЮЧЕНО: Запускаем первоначальное планирование
+    # Для включения раскомментируйте строку ниже:
+    # schedule_daily_report_reminders()
 
 def add_user_to_tracking(chat_id):
     """Добавить пользователя в отслеживание для напоминаний"""
