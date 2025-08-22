@@ -2311,5 +2311,9 @@ def send_order(chat_id, appended=False):
         logging.error(f"Ошибка сохранения данных заказа для магазина {shop}: {e}")
         # Continue execution as this is not critical for order delivery
 
+# Регистрация модуля учёта выходных
+from holidays import register_holiday_handlers
+register_holiday_handlers(bot)
+
 print("✅ Бот запущен...")
 bot.infinity_polling()
