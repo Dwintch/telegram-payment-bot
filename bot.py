@@ -2313,7 +2313,7 @@ def send_order(chat_id, appended=False):
 
 # Регистрация модуля учёта выходных
 from holidays import register_holiday_handlers
-register_holiday_handlers(bot)
+register_holiday_handlers(bot, debug_mode=False)  # Production mode - debug отключен
 
 print("✅ Бот запущен...")
 bot.infinity_polling()

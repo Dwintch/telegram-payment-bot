@@ -213,9 +213,7 @@ def handle_holiday_request(bot, message):
     """Обработчик команды подачи заявки на выходной"""
     logging.info(f"🎯 Обработка заявки на выходной от пользователя {message.from_user.id}")
     
-    if not is_holidays_chat_and_thread(message):
-        logging.info(f"❌ Заявка отклонена: неподходящий чат/топик")
-        return
+    # Фильтрация уже выполнена на уровне регистрации обработчика
     
     try:
         # Добавляем пользователя в базу
@@ -308,9 +306,7 @@ def handle_future_holidays_command(bot, message):
     """Обработчик команды /вых - показать будущие одобренные выходные"""
     logging.info(f"🎯 Обработка команды /вых от пользователя {message.from_user.id}")
     
-    if not is_holidays_chat_and_thread(message):
-        logging.info(f"❌ Команда /вых отклонена: неподходящий чат/топик")
-        return
+    # Фильтрация уже выполнена на уровне регистрации обработчика
     
     try:
         # Добавляем пользователя в базу
@@ -348,9 +344,7 @@ def handle_all_holidays_command(bot, message):
     """Обработчик команды /всевых - показать все одобренные выходные"""
     logging.info(f"🎯 Обработка команды /всевых от пользователя {message.from_user.id}")
     
-    if not is_holidays_chat_and_thread(message):
-        logging.info(f"❌ Команда /всевых отклонена: неподходящий чат/топик")
-        return
+    # Фильтрация уже выполнена на уровне регистрации обработчика
     
     try:
         # Добавляем пользователя в базу
@@ -394,9 +388,7 @@ def handle_approval_callback(bot, call):
     """Обработчик коллбэков для одобрения/отклонения заявок"""
     logging.info(f"🎯 Обработка callback от администратора {call.from_user.id}: {call.data}")
     
-    if call.message.chat.id != HOLIDAYS_CHAT_ID:
-        logging.warning(f"❌ Callback из неподходящего чата: {call.message.chat.id} (ожидается {HOLIDAYS_CHAT_ID})")
-        return
+    # Фильтрация по чату уже выполнена на уровне регистрации обработчика
     
     if not is_admin(call.from_user.id):
         bot.answer_callback_query(call.id, "❌ У вас нет прав для выполнения этого действия!")
@@ -493,23 +485,23 @@ def register_holiday_handlers(bot, debug_mode=True):
         debug_mode: Если True, регистрирует debug-обработчик (по умолчанию включен)
     """
     
-    # Команда подачи заявки на выходной
-    @bot.message_handler(commands=['выходной'])
+    # Команда подачи заявки на выходной - ТОЛЬКО для нужного чата и топика
+    @bot.message_handler(commands=['выходной'], func=lambda message: is_holidays_chat_and_thread(message))
     def holiday_request_handler(message):
         handle_holiday_request(bot, message)
     
-    # Команда просмотра будущих выходных
-    @bot.message_handler(commands=['вых'])
+    # Команда просмотра будущих выходных - ТОЛЬКО для нужного чата и топика
+    @bot.message_handler(commands=['вых'], func=lambda message: is_holidays_chat_and_thread(message))
     def future_holidays_handler(message):
         handle_future_holidays_command(bot, message)
     
-    # Команда просмотра всех выходных
-    @bot.message_handler(commands=['всевых'])
+    # Команда просмотра всех выходных - ТОЛЬКО для нужного чата и топика
+    @bot.message_handler(commands=['всевых'], func=lambda message: is_holidays_chat_and_thread(message))
     def all_holidays_handler(message):
         handle_all_holidays_command(bot, message)
     
-    # Обработчик коллбэков для одобрения/отклонения
-    @bot.callback_query_handler(func=lambda call: call.data.startswith(('holiday_approve_', 'holiday_reject_')))
+    # Обработчик коллбэков для одобрения/отклонения - ТОЛЬКО для нужного чата
+    @bot.callback_query_handler(func=lambda call: call.message.chat.id == HOLIDAYS_CHAT_ID and call.data.startswith(('holiday_approve_', 'holiday_reject_')))
     def approval_callback_handler(call):
         handle_approval_callback(bot, call)
     
