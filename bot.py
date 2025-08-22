@@ -1009,7 +1009,7 @@ def filter_photo_items(items):
     """Filter out photo-related items from list"""
     return [item for item in items if not is_photo_related_item(item)]
 
-def merge_order(chat_id, new_items):
+def merge_order(chat_id, new_items, thread_id=None):
     """Merge new items with current session order items"""
     user = user_data.get(chat_id)
     if not user:
@@ -1037,7 +1037,7 @@ def merge_order(chat_id, new_items):
         f"🔄 <b>Вот обновлённый заказ:</b> {combined_text}"
     )
     
-    bot.send_message(chat_id, merge_message)
+    send_message_with_thread_logging(chat_id, merge_message, thread_id=thread_id)
     
     return combined_items
 
@@ -1177,6 +1177,7 @@ def get_popular_items_keyboard():
 @bot.message_handler(content_types=['photo', 'video'])
 def handle_media(message):
     chat_id = message.chat.id
+    thread_id = get_thread_id_from_message(message)
     
     # Добавляем пользователя в систему отслеживания для напоминаний
     add_user_to_tracking(chat_id)
@@ -1184,17 +1185,17 @@ def handle_media(message):
     user = user_data.get(chat_id)
     caption = message.caption or ""
     if not user:
-        bot.send_message(chat_id, "📷/🎬 Медиа получено, но вы не в сессии.")
+        send_message_with_thread_logging(chat_id, "📷/🎬 Медиа получено, но вы не в сессии.", thread_id=thread_id)
         return
 
     stage = user.get("stage")
     if stage not in ["order_input", "delivery_confirm"]:
-        bot.send_message(chat_id, "📷/🎬 Медиа получено, но сейчас вы не оформляете заказ/приемку/до-заказ.")
+        send_message_with_thread_logging(chat_id, "📷/🎬 Медиа получено, но сейчас вы не оформляете заказ/приемку/до-заказ.", thread_id=thread_id)
         return
 
     # Prevent media from being added during delivery confirmation
     if stage == "delivery_confirm":
-        bot.send_message(chat_id, "⚠️ Медиа-файлы нельзя добавлять во время приёмки поставки.")
+        send_message_with_thread_logging(chat_id, "⚠️ Медиа-файлы нельзя добавлять во время приёмки поставки.", thread_id=thread_id)
         return
 
     if message.content_type == 'photo':
@@ -1202,13 +1203,13 @@ def handle_media(message):
         # Add clarification note to caption
         clarification_caption = f"Фото для уточнения, не отмечается в приёмке. {caption}".strip()
         user.setdefault("order_photos", []).append({"file_id": file_id, "caption": clarification_caption})
-        bot.send_message(chat_id, "📸 Фото добавлено с пометкой для уточнения!")
+        send_message_with_thread_logging(chat_id, "📸 Фото добавлено с пометкой для уточнения!", thread_id=thread_id)
     elif message.content_type == 'video':
         file_id = message.video.file_id
         # Add clarification note to caption
         clarification_caption = f"Видео для уточнения, не отмечается в приёмке. {caption}".strip()
         user.setdefault("order_videos", []).append({"file_id": file_id, "caption": clarification_caption})
-        bot.send_message(chat_id, "🎬 Видео добавлено с пометкой для уточнения!")
+        send_message_with_thread_logging(chat_id, "🎬 Видео добавлено с пометкой для уточнения!", thread_id=thread_id)
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -1797,7 +1798,7 @@ def handle_delivery_callback(call):
             report_lines.append("\n✅ <b>Всё приехало в полном объёме.</b>")
         
         final_report = "\n".join(report_lines)
-        bot.send_message(CHAT_ID_FOR_REPORT, final_report, message_thread_id=THREAD_ID_FOR_ORDER)
+        send_message_with_thread_logging(CHAT_ID_FOR_REPORT, final_report, thread_id=THREAD_ID_FOR_ORDER)
         
         # Delete old order message after delivery acceptance is completed
         if shop in shop_order_messages:
@@ -1989,16 +1990,16 @@ def handle_any_message(message):
             items = sanitize_input(text)
             if items:
                 # Use merge_order function instead of simple addition
-                user["order_items"] = merge_order(chat_id, items)
+                user["order_items"] = merge_order(chat_id, items, thread_id=thread_id)
                 
                 # Show enhanced order information if this is an appended order
                 is_appended = user.get("order_is_appended", False)
                 original_count = user.get("original_order_count", 0)
                 order_text = format_order_list(user["order_items"], show_appended_info=is_appended, original_count=original_count)
-                bot.send_message(chat_id, order_text)
-                bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
+                send_message_with_thread_logging(chat_id, order_text, thread_id=thread_id)
+                send_message_with_thread_logging(chat_id, "Выберите действие:", thread_id=thread_id, reply_markup=get_order_action_menu())
             else:
-                bot.send_message(chat_id, "⚠️ Введите товары через запятую или с новой строки.")
+                send_message_with_thread_logging(chat_id, "⚠️ Введите товары через запятую или с новой строки.", thread_id=thread_id)
         return
 
     # Обработка ввода товаров когда пользователь находится в стадии популярных товаров  
@@ -2012,30 +2013,30 @@ def handle_any_message(message):
             user["stage"] = "order_input"
             
             order_text = format_order_list(user["order_items"])
-            bot.send_message(chat_id, f"✅ Товары добавлены к заказу!\n\n{order_text}")
-            bot.send_message(chat_id, "Выберите действие:", reply_markup=get_order_action_menu())
+            send_message_with_thread_logging(chat_id, f"✅ Товары добавлены к заказу!\n\n{order_text}", thread_id=thread_id)
+            send_message_with_thread_logging(chat_id, "Выберите действие:", thread_id=thread_id, reply_markup=get_order_action_menu())
         return
 
     if text == "📦 Прием поставки":
         user["stage"] = "choose_shop_delivery"
-        bot.send_message(chat_id, "Выберите магазин для приемки поставки:", reply_markup=get_shop_menu(include_back=True))
+        send_message_with_thread_logging(chat_id, "Выберите магазин для приемки поставки:", thread_id=thread_id, reply_markup=get_shop_menu(include_back=True))
         return
 
     if text == "❌ Отменить":
         user.update({"mode": "add", "cash": 0, "terminal": 0, "stage": "main"})
-        bot.send_message(chat_id, "❌ Действие отменено. Выберите действие:", reply_markup=get_main_menu())
+        send_message_with_thread_logging(chat_id, "❌ Действие отменено. Выберите действие:", thread_id=thread_id, reply_markup=get_main_menu())
         return
 
     if text == "💰 Перевод":
         user["mode"] = "add"
         user["stage"] = "amount_input"
-        bot.send_message(chat_id, "Оп, лавешечка капнула! Сколько пришло?:")
+        send_message_with_thread_logging(chat_id, "Оп, thread_id=thread_id, лавешечка капнула! Сколько пришло?:")
         return
 
     if text == "💸 Возврат":
         user["mode"] = "subtract"
         user["stage"] = "amount_input"
-        bot.send_message(chat_id, "Смешно, возврат на сумму:")
+        send_message_with_thread_logging(chat_id, "Смешно, thread_id=thread_id, возврат на сумму:")
         return
 
     if text == "👀 Посмотреть сумму":
@@ -2043,9 +2044,9 @@ def handle_any_message(message):
         if shop in shop_data:
             total = sum(shop_data[shop]["transfers"])
             count = len(shop_data[shop]["transfers"])
-            bot.send_message(chat_id, f"📊 Сумма переводов по магазину {shop}: <b>{total}₽</b>\nКол-во транзакций: {count}")
+            send_message_with_thread_logging(chat_id, f"📊 Сумма переводов по магазину {shop}: <b>{total}₽</b>\nКол-во транзакций: {count}", thread_id=thread_id)
         else:
-            bot.send_message(chat_id, "⚠️ Магазин не выбран")
+            send_message_with_thread_logging(chat_id, "⚠️ Магазин не выбран", thread_id=thread_id)
         return
 
     if text == "📄 Составить отчёт":
@@ -2053,9 +2054,9 @@ def handle_any_message(message):
         shop = user.get("shop")
         if shop in shop_data:
             total = sum(shop_data[shop]["transfers"])
-            bot.send_message(chat_id, f"🧾 Переводов на сумму: <b>{total}₽</b>\nВведите сумму наличных:")
+            send_message_with_thread_logging(chat_id, f"🧾 Переводов на сумму: <b>{total}₽</b>\nВведите сумму наличных:", thread_id=thread_id)
         else:
-            bot.send_message(chat_id, "⚠️ Магазин не выбран")
+            send_message_with_thread_logging(chat_id, "⚠️ Магазин не выбран", thread_id=thread_id)
         return
 
     if text.isdigit():
@@ -2066,9 +2067,9 @@ def handle_any_message(message):
             shop = user.get("shop")
             if shop in shop_data:
                 shop_data[shop]["transfers"].append(amount)
-                bot.send_message(chat_id, f"✅ Добавлено: {amount}₽")
+                send_message_with_thread_logging(chat_id, f"✅ Добавлено: {amount}₽", thread_id=thread_id)
                 total = sum(shop_data[shop]["transfers"])
-                bot.send_message(chat_id, f"💰 Текущая сумма по магазину {shop}: <b>{total}₽</b>", reply_markup=get_main_menu())
+                send_message_with_thread_logging(chat_id, f"💰 Текущая сумма по магазину {shop}: <b>{total}₽</b>", thread_id=thread_id, reply_markup=get_main_menu())
                 save_data()  # Сохраняем изменения
             return
 
@@ -2077,9 +2078,9 @@ def handle_any_message(message):
             shop = user.get("shop")
             if shop in shop_data:
                 shop_data[shop]["transfers"].append(-amount if user["mode"] == "subtract" else amount)
-                bot.send_message(chat_id, f"{'➖ Возврат' if user['mode']=='subtract' else '✅ Добавлено'}: {amount}₽")
+                send_message_with_thread_logging(chat_id, f"{'➖ Возврат' if user['mode']=='subtract' else '✅ Добавлено'}: {amount}₽", thread_id=thread_id)
                 total = sum(shop_data[shop]["transfers"])
-                bot.send_message(chat_id, f"💰 Текущая сумма по магазину {shop}: <b>{total}₽</b>", reply_markup=get_main_menu())
+                send_message_with_thread_logging(chat_id, f"💰 Текущая сумма по магазину {shop}: <b>{total}₽</b>", thread_id=thread_id, reply_markup=get_main_menu())
                 save_data()  # Сохраняем изменения
             user["mode"] = "add"
             user["stage"] = "main"
@@ -2088,14 +2089,14 @@ def handle_any_message(message):
         elif stage == "cash_input":
             user["cash"] = amount
             user["stage"] = "terminal_input"
-            bot.send_message(chat_id, "Сколько по терминалу:")
+            send_message_with_thread_logging(chat_id, "Сколько по терминалу:", thread_id=thread_id)
             return
 
         elif stage == "terminal_input":
             user["terminal"] = amount
             user["stage"] = "choose_staff"
             user["selected_staff"] = []
-            bot.send_message(chat_id, "Выберите сотрудников, которые были на смене:", reply_markup=get_staff_keyboard())
+            send_message_with_thread_logging(chat_id, "Выберите сотрудников, thread_id=thread_id, которые были на смене:", reply_markup=get_staff_keyboard())
             return
 
     if user.get("stage") == "confirm_report":
@@ -2110,19 +2111,19 @@ def handle_any_message(message):
             user["selected_staff"] = []
             user["stage"] = "choose_shop"
             save_data()  # Сохраняем изменения
-            bot.send_message(chat_id, "✅ Отчёт отправлен! Выберите магазин для переводов:", reply_markup=get_shop_menu())
+            send_message_with_thread_logging(chat_id, "✅ Отчёт отправлен! Выберите магазин для переводов:", thread_id=thread_id, reply_markup=get_shop_menu())
             return
         elif text == "✏️ Изменить данные":
             user["stage"] = "cash_input"
-            bot.send_message(chat_id, "Введите сумму наличных:")
+            send_message_with_thread_logging(chat_id, "Введите сумму наличных:", thread_id=thread_id)
             return
         elif text == "🗓 Изменить дату":
             user["stage"] = "custom_date_input"
-            bot.send_message(chat_id, "Введите дату отчёта в формате ДД.ММ.ГГГГ:")
+            send_message_with_thread_logging(chat_id, "Введите дату отчёта в формате ДД.ММ.ГГГГ:", thread_id=thread_id)
             return
         elif text == "❌ Отмена":
             user["stage"] = "main"
-            bot.send_message(chat_id, "Отмена подтверждения отчёта.", reply_markup=get_main_menu())
+            send_message_with_thread_logging(chat_id, "Отмена подтверждения отчёта.", thread_id=thread_id, reply_markup=get_main_menu())
             return
 
     if user.get("stage") == "custom_date_input":
@@ -2130,13 +2131,13 @@ def handle_any_message(message):
             custom_date = datetime.strptime(text, "%d.%m.%Y")
             user["date"] = custom_date.strftime("%d.%m.%Y")
             user["stage"] = "confirm_report"
-            bot.send_message(chat_id, f"✅ Дата изменена на: {user['date']}")
+            send_message_with_thread_logging(chat_id, f"✅ Дата изменена на: {user['date']}", thread_id=thread_id)
             preview_report(chat_id)
         except ValueError:
-            bot.send_message(chat_id, "⚠️ Неверный формат даты. Введите в формате ДД.ММ.ГГГГ:")
+            send_message_with_thread_logging(chat_id, "⚠️ Неверный формат даты. Введите в формате ДД.ММ.ГГГГ:", thread_id=thread_id)
         return
 
-    bot.send_message(chat_id, "Выберите действие:", reply_markup=get_main_menu())
+    send_message_with_thread_logging(chat_id, "Выберите действие:", thread_id=thread_id, reply_markup=get_main_menu())
 
 def preview_report(chat_id):
     data = user_data[chat_id]
@@ -2177,7 +2178,7 @@ def preview_report(chat_id):
         f"{weather_report}"
     )
 
-    bot.send_message(chat_id, report_text, reply_markup=get_confirm_menu())
+    send_message_with_thread_logging(chat_id, report_text, thread_id=thread_id, reply_markup=get_confirm_menu())
 
 def send_report(chat_id):
     data = user_data[chat_id]
@@ -2202,7 +2203,7 @@ def send_report(chat_id):
     )
 
     sheet.append_row([date, shop, transfers, cash, terminal, staff, weather_report])
-    bot.send_message(CHAT_ID_FOR_REPORT, report_text, message_thread_id=THREAD_ID_FOR_REPORT)
+    send_message_with_thread_logging(CHAT_ID_FOR_REPORT, report_text, thread_id=THREAD_ID_FOR_ORDER)
 
 def send_order(chat_id, appended=False):
     user = user_data[chat_id]
@@ -2212,7 +2213,9 @@ def send_order(chat_id, appended=False):
     videos = user.get("order_videos", [])
 
     if not items:
-        bot.send_message(chat_id, "⚠️ Заказ пуст, нечего отправлять.")
+        # This is an error case - send_order should not be called from user input context
+        # Using None for thread_id as it's an automatic message to the order channel
+        send_message_with_thread_logging(CHAT_ID_FOR_REPORT, "⚠️ Заказ пуст, нечего отправлять.", thread_id=THREAD_ID_FOR_ORDER)
         return
 
     # При автоматическом объединении заказов удаляем предыдущее сообщение заказа
@@ -2265,8 +2268,8 @@ def send_order(chat_id, appended=False):
         media_count = len(photos) + len(videos)
         order_text += f"\n📎 Вложения: {media_count} файл(ов) одним альбомом"
     
-    # Отправляем основное сообщение с заказом
-    order_message = bot.send_message(CHAT_ID_FOR_REPORT, order_text, message_thread_id=THREAD_ID_FOR_ORDER)
+    # Отправляем основное сообщение с заказом (автоматическое сообщение в группу)
+    order_message = send_message_with_thread_logging(CHAT_ID_FOR_REPORT, order_text, thread_id=THREAD_ID_FOR_ORDER)
     
     # Отправляем все медиа-файлы альбомами, если они есть
     if photos or videos:
@@ -2293,15 +2296,15 @@ def send_order(chat_id, appended=False):
                 # Один файл - отправляем отдельно
                 media = all_media[0]
                 if media.type == 'photo':
-                    bot.send_photo(CHAT_ID_FOR_REPORT, media.media, caption=media.caption, message_thread_id=THREAD_ID_FOR_ORDER)
+                    send_photo_with_thread_logging(CHAT_ID_FOR_REPORT, media.media, thread_id=THREAD_ID_FOR_ORDER)
                 else:
-                    bot.send_video(CHAT_ID_FOR_REPORT, media.media, caption=media.caption, message_thread_id=THREAD_ID_FOR_ORDER)
+                    send_video_with_thread_logging(CHAT_ID_FOR_REPORT, media.media, thread_id=THREAD_ID_FOR_ORDER)
             elif len(all_media) <= 10:
                 # 2-10 файлов - отправляем одним альбомом
-                bot.send_media_group(
+                send_media_group_with_thread_logging(
                     chat_id=CHAT_ID_FOR_REPORT,
                     media=all_media,
-                    message_thread_id=THREAD_ID_FOR_ORDER
+                    thread_id=THREAD_ID_FOR_ORDER
                 )
             else:
                 # Больше 10 файлов - разбиваем на альбомы по 10
@@ -2311,15 +2314,15 @@ def send_order(chat_id, appended=False):
                         # Один файл в чанке - отправляем отдельно
                         media = chunk[0]
                         if media.type == 'photo':
-                            bot.send_photo(CHAT_ID_FOR_REPORT, media.media, caption=media.caption, message_thread_id=THREAD_ID_FOR_ORDER)
+                            send_photo_with_thread_logging(CHAT_ID_FOR_REPORT, media.media, thread_id=THREAD_ID_FOR_ORDER)
                         else:
-                            bot.send_video(CHAT_ID_FOR_REPORT, media.media, caption=media.caption, message_thread_id=THREAD_ID_FOR_ORDER)
+                            send_video_with_thread_logging(CHAT_ID_FOR_REPORT, media.media, thread_id=THREAD_ID_FOR_ORDER)
                     else:
                         # 2-10 файлов в чанке - отправляем альбомом
-                        bot.send_media_group(
+                        send_media_group_with_thread_logging(
                             chat_id=CHAT_ID_FOR_REPORT,
                             media=chunk,
-                            message_thread_id=THREAD_ID_FOR_ORDER
+                            thread_id=THREAD_ID_FOR_ORDER
                         )
                 
         except Exception as e:
@@ -2327,13 +2330,13 @@ def send_order(chat_id, appended=False):
             # Fallback: отправляем медиа по отдельности как раньше
             for photo in photos:
                 try:
-                    bot.send_photo(CHAT_ID_FOR_REPORT, photo["file_id"], caption=photo.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
+                    send_photo_with_thread_logging(CHAT_ID_FOR_REPORT, photo["file_id"], thread_id=THREAD_ID_FOR_ORDER, caption=photo.get("caption", ""))
                 except Exception as photo_error:
                     print(f"Ошибка отправки фото: {photo_error}")
 
             for video in videos:
                 try:
-                    bot.send_video(CHAT_ID_FOR_REPORT, video["file_id"], caption=video.get("caption", ""), message_thread_id=THREAD_ID_FOR_ORDER)
+                    send_video_with_thread_logging(CHAT_ID_FOR_REPORT, video["file_id"], thread_id=THREAD_ID_FOR_ORDER, caption=video.get("caption", ""))
                 except Exception as video_error:
                     print(f"Ошибка отправки видео: {video_error}")
 
@@ -2356,13 +2359,13 @@ def send_order(chat_id, appended=False):
         # Поздний заказ (22:00-00:00) - поощрение за работу, но мотивация заказывать раньше
         if 22 <= current_hour <= 23 or current_hour == 0:
             encouragement_message = get_random_message_with_no_repeat(ORDER_EARLY_ENCOURAGE, None)
-            bot.send_message(chat_id, encouragement_message)
+            send_message_with_thread_logging(chat_id, encouragement_message, thread_id=thread_id)
             logging.info(f"Отправлено поощрение за поздний заказ пользователю {chat_id}")
         
         # Поздний дневной заказ (09:00-15:00) - мягкий упрёк о том, что может не успеть
         elif 9 <= current_hour <= 15:
             warning_message = get_random_message_with_no_repeat(ORDER_LATE_WARNINGS, None)
-            bot.send_message(chat_id, warning_message)
+            send_message_with_thread_logging(chat_id, warning_message, thread_id=thread_id)
             logging.info(f"Отправлено предупреждение о позднем заказе пользователю {chat_id}")
             
     except Exception as e:

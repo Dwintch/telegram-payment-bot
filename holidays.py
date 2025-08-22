@@ -18,6 +18,49 @@ from holidays_config import (
     HOLIDAYS_DB_PATH
 )
 
+# === THREAD ID UTILITY FUNCTIONS FOR HOLIDAYS ===
+def get_thread_id_from_message(message):
+    """Извлечь thread_id из входящего сообщения Telegram"""
+    if hasattr(message, 'message_thread_id') and message.message_thread_id:
+        return message.message_thread_id
+    return None
+
+def send_message_with_thread_logging(bot, chat_id, text, thread_id=None, **kwargs):
+    """Отправить сообщение с логированием чата и топика (holidays module)"""
+    try:
+        # Логируем куда отправляем сообщение
+        thread_info = f"thread {thread_id}" if thread_id else "основной чат"
+        logging.info(f"📤 [HOLIDAYS] Отправка сообщения в чат {chat_id}, {thread_info}")
+        
+        # Отправляем сообщение
+        if thread_id:
+            kwargs['message_thread_id'] = thread_id
+        result = bot.send_message(chat_id, text, **kwargs)
+        
+        logging.info(f"✅ [HOLIDAYS] Сообщение успешно отправлено в чат {chat_id}, {thread_info}")
+        return result
+    except Exception as e:
+        thread_info = f"thread {thread_id}" if thread_id else "основной чат"
+        logging.error(f"❌ [HOLIDAYS] Ошибка отправки сообщения в чат {chat_id}, {thread_info}: {e}")
+        raise
+
+def reply_to_with_thread_logging(bot, message, text, **kwargs):
+    """Ответить на сообщение с логированием (holidays module)"""
+    try:
+        thread_id = get_thread_id_from_message(message)
+        thread_info = f"thread {thread_id}" if thread_id else "основной чат"
+        logging.info(f"📤 [HOLIDAYS] Ответ на сообщение в чат {message.chat.id}, {thread_info}")
+        
+        result = bot.reply_to(message, text, **kwargs)
+        
+        logging.info(f"✅ [HOLIDAYS] Ответ успешно отправлен в чат {message.chat.id}, {thread_info}")
+        return result
+    except Exception as e:
+        thread_id = get_thread_id_from_message(message)
+        thread_info = f"thread {thread_id}" if thread_id else "основной чат"
+        logging.error(f"❌ [HOLIDAYS] Ошибка отправки ответа в чат {message.chat.id}, {thread_info}: {e}")
+        raise
+
 # Статусы заявок
 STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
@@ -274,7 +317,7 @@ def handle_holiday_request(bot, message):
             f"🆔 Номер заявки: #{request_id}\n\n"
             f"Ваша заявка будет рассмотрена администратором."
         )
-        bot.reply_to(message, confirmation_msg)
+        reply_to_with_thread_logging(bot, message, confirmation_msg)
         logging.info(f"✅ Подтверждение отправлено пользователю {message.from_user.id}")
         
         # Отправляем уведомление администраторам
@@ -288,10 +331,11 @@ def handle_holiday_request(bot, message):
         )
         
         try:
-            bot.send_message(
+            send_message_with_thread_logging(
+                bot,
                 HOLIDAYS_CHAT_ID,
                 admin_text,
-                message_thread_id=HOLIDAYS_THREAD_ID,
+                thread_id=HOLIDAYS_THREAD_ID,
                 reply_markup=create_approval_keyboard(request_id)
             )
             logging.info(f"✅ Уведомление администраторам отправлено для заявки #{request_id}")
@@ -535,10 +579,11 @@ def register_holiday_handlers(bot, debug_mode=True):
                     logging.info(f"🔧 DEBUG Handler: отправляем отладочный ответ в чат {chat_id}, топик {thread_id}")
                     
                     # Отправляем в тот же топик, где получили сообщение
-                    bot.send_message(
+                    send_message_with_thread_logging(
+                        bot,
                         chat_id=chat_id,
                         text=debug_response,
-                        message_thread_id=thread_id
+                        thread_id=thread_id
                     )
                 else:
                     logging.info(f"🔧 DEBUG Handler: сообщение из неподходящего топика, не отвечаем")
