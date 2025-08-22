@@ -152,8 +152,22 @@ db = HolidayDatabase(HOLIDAYS_DB_PATH)
 
 def is_holidays_chat_and_thread(message) -> bool:
     """Проверить, что сообщение из нужного чата и топика"""
-    return (message.chat.id == HOLIDAYS_CHAT_ID and 
-            getattr(message, 'message_thread_id', None) == HOLIDAYS_THREAD_ID)
+    # Логируем все входящие сообщения для отладки
+    chat_id = message.chat.id
+    thread_id = getattr(message, 'message_thread_id', None)
+    text = getattr(message, 'text', 'N/A')
+    user_id = message.from_user.id if message.from_user else 'Unknown'
+    
+    logging.info(f"🔍 DEBUG: Входящее сообщение - Chat ID: {chat_id}, Thread ID: {thread_id}, User ID: {user_id}, Text: '{text[:50]}{'...' if len(text) > 50 else ''}'")
+    
+    result = (chat_id == HOLIDAYS_CHAT_ID and thread_id == HOLIDAYS_THREAD_ID)
+    
+    if not result:
+        logging.info(f"❌ Сообщение отфильтровано: ожидается Chat ID: {HOLIDAYS_CHAT_ID}, Thread ID: {HOLIDAYS_THREAD_ID}")
+    else:
+        logging.info(f"✅ Сообщение соответствует фильтру holidays")
+    
+    return result
 
 def is_admin(user_id: int) -> bool:
     """Проверить, является ли пользователь администратором"""
@@ -197,7 +211,10 @@ def create_approval_keyboard(request_id: int) -> types.InlineKeyboardMarkup:
 
 def handle_holiday_request(bot, message):
     """Обработчик команды подачи заявки на выходной"""
+    logging.info(f"🎯 Обработка заявки на выходной от пользователя {message.from_user.id}")
+    
     if not is_holidays_chat_and_thread(message):
+        logging.info(f"❌ Заявка отклонена: неподходящий чат/топик")
         return
     
     try:
@@ -208,46 +225,59 @@ def handle_holiday_request(bot, message):
             "last_name": message.from_user.last_name
         }
         db.add_user(message.from_user.id, user_data)
+        logging.info(f"✅ Пользователь {message.from_user.id} добавлен в базу")
         
         # Парсим текст сообщения
         text = message.text.strip()
         parts = text.split(None, 2)  # Разделяем на максимум 3 части
         
         if len(parts) < 3:
-            bot.reply_to(message, 
+            error_msg = (
                 "❌ Неправильный формат команды!\n\n"
                 "Используйте: /выходной ГГГГ-ММ-ДД причина\n"
-                "Пример: /выходной 2024-12-31 семейные обстоятельства")
+                "Пример: /выходной 2024-12-31 семейные обстоятельства"
+            )
+            bot.reply_to(message, error_msg)
+            logging.info(f"❌ Неправильный формат команды от пользователя {message.from_user.id}")
             return
         
         command, date_str, reason = parts
+        logging.info(f"📅 Парсинг заявки: дата={date_str}, причина={reason[:30]}...")
         
         # Проверяем формат даты
         try:
             holiday_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         except ValueError:
-            bot.reply_to(message, 
+            error_msg = (
                 "❌ Неправильный формат даты!\n\n"
                 "Используйте формат ГГГГ-ММ-ДД\n"
-                "Пример: 2024-12-31")
+                "Пример: 2024-12-31"
+            )
+            bot.reply_to(message, error_msg)
+            logging.error(f"❌ Неправильный формат даты '{date_str}' от пользователя {message.from_user.id}")
             return
         
         # Проверяем, что дата в будущем
         if holiday_date <= date.today():
             bot.reply_to(message, "❌ Нельзя подать заявку на прошедшую дату!")
+            logging.info(f"❌ Попытка подачи заявки на прошедшую дату {date_str} от пользователя {message.from_user.id}")
             return
         
         # Создаем заявку
         request_id = db.create_request(message.from_user.id, date_str, reason)
+        logging.info(f"✅ Создана заявка #{request_id} от пользователя {message.from_user.id}")
         
         # Отправляем подтверждение пользователю
         user_name = get_user_display_name(user_data)
-        bot.reply_to(message, 
+        confirmation_msg = (
             f"✅ Заявка на выходной подана!\n\n"
             f"📅 Дата: {format_date(date_str)}\n"
             f"📝 Причина: {reason}\n"
             f"🆔 Номер заявки: #{request_id}\n\n"
-            f"Ваша заявка будет рассмотрена администратором.")
+            f"Ваша заявка будет рассмотрена администратором."
+        )
+        bot.reply_to(message, confirmation_msg)
+        logging.info(f"✅ Подтверждение отправлено пользователю {message.from_user.id}")
         
         # Отправляем уведомление администраторам
         admin_text = (
@@ -266,16 +296,20 @@ def handle_holiday_request(bot, message):
                 message_thread_id=HOLIDAYS_THREAD_ID,
                 reply_markup=create_approval_keyboard(request_id)
             )
+            logging.info(f"✅ Уведомление администраторам отправлено для заявки #{request_id}")
         except Exception as e:
-            logging.error(f"Ошибка отправки уведомления администраторам: {e}")
+            logging.error(f"❌ Ошибка отправки уведомления администраторам: {e}")
     
     except Exception as e:
-        logging.error(f"Ошибка обработки заявки на выходной: {e}")
+        logging.error(f"❌ Ошибка обработки заявки на выходной от пользователя {message.from_user.id}: {e}")
         bot.reply_to(message, "❌ Произошла ошибка при подаче заявки. Попробуйте позже.")
 
 def handle_future_holidays_command(bot, message):
     """Обработчик команды /вых - показать будущие одобренные выходные"""
+    logging.info(f"🎯 Обработка команды /вых от пользователя {message.from_user.id}")
+    
     if not is_holidays_chat_and_thread(message):
+        logging.info(f"❌ Команда /вых отклонена: неподходящий чат/топик")
         return
     
     try:
@@ -286,9 +320,11 @@ def handle_future_holidays_command(bot, message):
             "last_name": message.from_user.last_name
         }
         db.add_user(message.from_user.id, user_data)
+        logging.info(f"✅ Пользователь {message.from_user.id} добавлен в базу для команды /вых")
         
         # Получаем будущие одобренные заявки
         requests = db.get_future_approved_requests(message.from_user.id)
+        logging.info(f"📊 Найдено {len(requests)} будущих одобренных заявок для пользователя {message.from_user.id}")
         
         if not requests:
             bot.reply_to(message, "📅 У вас нет запланированных выходных дней.")
@@ -302,14 +338,18 @@ def handle_future_holidays_command(bot, message):
             text += f"🆔 Заявка: #{req['id']}\n\n"
         
         bot.reply_to(message, text)
+        logging.info(f"✅ Список будущих выходных отправлен пользователю {message.from_user.id}")
     
     except Exception as e:
-        logging.error(f"Ошибка получения будущих выходных: {e}")
+        logging.error(f"❌ Ошибка получения будущих выходных для пользователя {message.from_user.id}: {e}")
         bot.reply_to(message, "❌ Произошла ошибка при получении данных.")
 
 def handle_all_holidays_command(bot, message):
     """Обработчик команды /всевых - показать все одобренные выходные"""
+    logging.info(f"🎯 Обработка команды /всевых от пользователя {message.from_user.id}")
+    
     if not is_holidays_chat_and_thread(message):
+        logging.info(f"❌ Команда /всевых отклонена: неподходящий чат/топик")
         return
     
     try:
@@ -320,9 +360,11 @@ def handle_all_holidays_command(bot, message):
             "last_name": message.from_user.last_name
         }
         db.add_user(message.from_user.id, user_data)
+        logging.info(f"✅ Пользователь {message.from_user.id} добавлен в базу для команды /всевых")
         
         # Получаем все одобренные заявки
         requests = db.get_all_approved_requests(message.from_user.id)
+        logging.info(f"📊 Найдено {len(requests)} всех одобренных заявок для пользователя {message.from_user.id}")
         
         if not requests:
             bot.reply_to(message, "📅 У вас нет одобренных выходных дней.")
@@ -339,20 +381,26 @@ def handle_all_holidays_command(bot, message):
         # Ограничиваем длину сообщения
         if len(text) > 4000:
             text = text[:3950] + "\n\n... (список обрезан)"
+            logging.info(f"⚠️ Список всех выходных обрезан для пользователя {message.from_user.id}")
         
         bot.reply_to(message, text)
+        logging.info(f"✅ Список всех выходных отправлен пользователю {message.from_user.id}")
     
     except Exception as e:
-        logging.error(f"Ошибка получения всех выходных: {e}")
+        logging.error(f"❌ Ошибка получения всех выходных для пользователя {message.from_user.id}: {e}")
         bot.reply_to(message, "❌ Произошла ошибка при получении данных.")
 
 def handle_approval_callback(bot, call):
     """Обработчик коллбэков для одобрения/отклонения заявок"""
+    logging.info(f"🎯 Обработка callback от администратора {call.from_user.id}: {call.data}")
+    
     if call.message.chat.id != HOLIDAYS_CHAT_ID:
+        logging.warning(f"❌ Callback из неподходящего чата: {call.message.chat.id} (ожидается {HOLIDAYS_CHAT_ID})")
         return
     
     if not is_admin(call.from_user.id):
         bot.answer_callback_query(call.id, "❌ У вас нет прав для выполнения этого действия!")
+        logging.warning(f"❌ Неавторизованная попытка callback от пользователя {call.from_user.id}")
         return
     
     try:
@@ -368,22 +416,30 @@ def handle_approval_callback(bot, call):
             status_text = "❌ ОТКЛОНЕНА"
             action_text = "отклонена"
         else:
+            logging.warning(f"❌ Неизвестный callback: {callback_data}")
             return
+        
+        logging.info(f"📋 Обработка заявки #{request_id}: {action_text}")
         
         # Получаем заявку
         request = db.get_request(request_id)
         if not request:
             bot.answer_callback_query(call.id, "❌ Заявка не найдена!")
+            logging.error(f"❌ Заявка #{request_id} не найдена")
             return
         
         if request["status"] != STATUS_PENDING:
             bot.answer_callback_query(call.id, "❌ Заявка уже обработана!")
+            logging.info(f"⚠️ Заявка #{request_id} уже обработана (статус: {request['status']})")
             return
         
         # Обновляем статус заявки
         if not db.update_request_status(request_id, status, call.from_user.id):
             bot.answer_callback_query(call.id, "❌ Ошибка обновления заявки!")
+            logging.error(f"❌ Не удалось обновить статус заявки #{request_id}")
             return
+        
+        logging.info(f"✅ Статус заявки #{request_id} обновлен на '{status}' администратором {call.from_user.id}")
         
         # Получаем информацию о пользователе, подавшем заявку
         user_info = db.get_user_info(request["user_id"])
@@ -406,6 +462,7 @@ def handle_approval_callback(bot, call):
             chat_id=call.message.chat.id,
             message_id=call.message.message_id
         )
+        logging.info(f"✅ Сообщение администратора обновлено для заявки #{request_id}")
         
         # Отправляем уведомление пользователю
         notification_text = (
@@ -417,13 +474,14 @@ def handle_approval_callback(bot, call):
         
         try:
             bot.send_message(request["user_id"], notification_text)
+            logging.info(f"✅ Уведомление отправлено пользователю {request['user_id']} о заявке #{request_id}")
         except Exception as e:
-            logging.error(f"Ошибка отправки уведомления пользователю {request['user_id']}: {e}")
+            logging.error(f"❌ Ошибка отправки уведомления пользователю {request['user_id']}: {e}")
         
         bot.answer_callback_query(call.id, f"✅ Заявка {action_text}!")
     
     except Exception as e:
-        logging.error(f"Ошибка обработки коллбэка одобрения: {e}")
+        logging.error(f"❌ Ошибка обработки коллбэка одобрения от администратора {call.from_user.id}: {e}")
         bot.answer_callback_query(call.id, "❌ Произошла ошибка!")
 
 def register_holiday_handlers(bot):
@@ -449,4 +507,38 @@ def register_holiday_handlers(bot):
     def approval_callback_handler(call):
         handle_approval_callback(bot, call)
     
+    # ВРЕМЕННЫЙ DEBUG-ОБРАБОТЧИК - отвечает на любое сообщение в целевой группе
+    @bot.message_handler(func=lambda message: message.chat.id == HOLIDAYS_CHAT_ID)
+    def debug_message_handler(message):
+        """Временный обработчик для отладки - отвечает на любое сообщение в группе"""
+        try:
+            chat_id = message.chat.id
+            thread_id = getattr(message, 'message_thread_id', None)
+            text = getattr(message, 'text', 'N/A')
+            user_id = message.from_user.id if message.from_user else 'Unknown'
+            
+            debug_response = (
+                f"🔧 DEBUG: Я вижу сообщение из чата {chat_id}, "
+                f"топика {thread_id}, от пользователя {user_id}.\n"
+                f"Текст: '{text[:100]}{'...' if len(text) > 100 else ''}'\n\n"
+                f"Настройки модуля:\n"
+                f"• Ожидаемый Chat ID: {HOLIDAYS_CHAT_ID}\n"
+                f"• Ожидаемый Thread ID: {HOLIDAYS_THREAD_ID}\n"
+                f"• Совпадает чат: {'✅' if chat_id == HOLIDAYS_CHAT_ID else '❌'}\n"
+                f"• Совпадает топик: {'✅' if thread_id == HOLIDAYS_THREAD_ID else '❌'}"
+            )
+            
+            logging.info(f"🔧 DEBUG Handler: отправляем отладочный ответ в чат {chat_id}, топик {thread_id}")
+            
+            # Отправляем в тот же топик, где получили сообщение
+            bot.send_message(
+                chat_id=chat_id,
+                text=debug_response,
+                message_thread_id=thread_id
+            )
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка в debug-обработчике: {e}")
+    
     logging.info("✅ Модуль учёта выходных успешно зарегистрирован")
+    logging.info(f"🔧 DEBUG: Активирован временный debug-обработчик для чата {HOLIDAYS_CHAT_ID}")
