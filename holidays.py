@@ -517,32 +517,39 @@ def register_holiday_handlers(bot, debug_mode=True):
     if debug_mode:
         @bot.message_handler(func=lambda message: message.chat.id == HOLIDAYS_CHAT_ID)
         def debug_message_handler(message):
-            """Временный обработчик для отладки - отвечает на любое сообщение в группе"""
+            """Временный обработчик для отладки - логирует все сообщения, отвечает только в нужном топике"""
             try:
                 chat_id = message.chat.id
                 thread_id = getattr(message, 'message_thread_id', None)
                 text = getattr(message, 'text', 'N/A')
                 user_id = message.from_user.id if message.from_user else 'Unknown'
                 
-                debug_response = (
-                    f"🔧 DEBUG: Я вижу сообщение из чата {chat_id}, "
-                    f"топика {thread_id}, от пользователя {user_id}.\n"
-                    f"Текст: '{text[:100]}{'...' if len(text) > 100 else ''}'\n\n"
-                    f"Настройки модуля:\n"
-                    f"• Ожидаемый Chat ID: {HOLIDAYS_CHAT_ID}\n"
-                    f"• Ожидаемый Thread ID: {HOLIDAYS_THREAD_ID}\n"
-                    f"• Совпадает чат: {'✅' if chat_id == HOLIDAYS_CHAT_ID else '❌'}\n"
-                    f"• Совпадает топик: {'✅' if thread_id == HOLIDAYS_THREAD_ID else '❌'}"
-                )
+                # Логируем все сообщения из группы для отладки (как требуется в задаче)
+                logging.info(f"🔍 DEBUG: Сообщение в группе - Chat ID: {chat_id}, Thread ID: {thread_id}, User ID: {user_id}, Text: '{text[:50]}{'...' if len(text) > 50 else ''}'")
                 
-                logging.info(f"🔧 DEBUG Handler: отправляем отладочный ответ в чат {chat_id}, топик {thread_id}")
-                
-                # Отправляем в тот же топик, где получили сообщение
-                bot.send_message(
-                    chat_id=chat_id,
-                    text=debug_response,
-                    message_thread_id=thread_id
-                )
+                # Отвечаем только если сообщение из нужного топика
+                if is_holidays_chat_and_thread(message):
+                    debug_response = (
+                        f"🔧 DEBUG: Я вижу сообщение из чата {chat_id}, "
+                        f"топика {thread_id}, от пользователя {user_id}.\n"
+                        f"Текст: '{text[:100]}{'...' if len(text) > 100 else ''}'\n\n"
+                        f"Настройки модуля:\n"
+                        f"• Ожидаемый Chat ID: {HOLIDAYS_CHAT_ID}\n"
+                        f"• Ожидаемый Thread ID: {HOLIDAYS_THREAD_ID}\n"
+                        f"• Совпадает чат: {'✅' if chat_id == HOLIDAYS_CHAT_ID else '❌'}\n"
+                        f"• Совпадает топик: {'✅' if thread_id == HOLIDAYS_THREAD_ID else '❌'}"
+                    )
+                    
+                    logging.info(f"🔧 DEBUG Handler: отправляем отладочный ответ в чат {chat_id}, топик {thread_id}")
+                    
+                    # Отправляем в тот же топик, где получили сообщение
+                    bot.send_message(
+                        chat_id=chat_id,
+                        text=debug_response,
+                        message_thread_id=thread_id
+                    )
+                else:
+                    logging.info(f"🔧 DEBUG Handler: сообщение из неподходящего топика, не отвечаем")
                 
             except Exception as e:
                 logging.error(f"❌ Ошибка в debug-обработчике: {e}")
