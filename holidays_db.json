@@ -31,9 +31,9 @@
   "users": {
     "12345": {
       "username": "test_user",
-      "first_name": "Тест",
-      "last_name": "Пользователь",
-      "last_update": "2025-08-22T12:04:21.189370"
+      "first_name": "Test",
+      "last_name": "User",
+      "last_update": "2025-08-22T12:40:09.925706"
     }
   },
   "next_id": 4
