@@ -212,6 +212,83 @@ creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope
 client = gspread.authorize(creds)
 sheet = client.open(GOOGLE_SHEET_NAME).sheet1
 
+# === THREAD ID UTILITY FUNCTIONS ===
+def get_thread_id_from_message(message):
+    """Извлечь thread_id из входящего сообщения Telegram"""
+    if hasattr(message, 'message_thread_id') and message.message_thread_id:
+        return message.message_thread_id
+    return None
+
+def send_message_with_thread_logging(chat_id, text, thread_id=None, **kwargs):
+    """Отправить сообщение с логированием чата и топика"""
+    try:
+        # Логируем куда отправляем сообщение
+        thread_info = f"thread {thread_id}" if thread_id else "основной чат"
+        logging.info(f"📤 Отправка сообщения в чат {chat_id}, {thread_info}")
+        
+        # Отправляем сообщение
+        if thread_id:
+            kwargs['message_thread_id'] = thread_id
+        result = bot.send_message(chat_id, text, **kwargs)
+        
+        logging.info(f"✅ Сообщение успешно отправлено в чат {chat_id}, {thread_info}")
+        return result
+    except Exception as e:
+        thread_info = f"thread {thread_id}" if thread_id else "основной чат"
+        logging.error(f"❌ Ошибка отправки сообщения в чат {chat_id}, {thread_info}: {e}")
+        raise
+
+def send_photo_with_thread_logging(chat_id, photo, thread_id=None, **kwargs):
+    """Отправить фото с логированием чата и топика"""
+    try:
+        thread_info = f"thread {thread_id}" if thread_id else "основной чат"
+        logging.info(f"📤 Отправка фото в чат {chat_id}, {thread_info}")
+        
+        if thread_id:
+            kwargs['message_thread_id'] = thread_id
+        result = bot.send_photo(chat_id, photo, **kwargs)
+        
+        logging.info(f"✅ Фото успешно отправлено в чат {chat_id}, {thread_info}")
+        return result
+    except Exception as e:
+        thread_info = f"thread {thread_id}" if thread_id else "основной чат"
+        logging.error(f"❌ Ошибка отправки фото в чат {chat_id}, {thread_info}: {e}")
+        raise
+
+def send_video_with_thread_logging(chat_id, video, thread_id=None, **kwargs):
+    """Отправить видео с логированием чата и топика"""
+    try:
+        thread_info = f"thread {thread_id}" if thread_id else "основной чат"
+        logging.info(f"📤 Отправка видео в чат {chat_id}, {thread_info}")
+        
+        if thread_id:
+            kwargs['message_thread_id'] = thread_id
+        result = bot.send_video(chat_id, video, **kwargs)
+        
+        logging.info(f"✅ Видео успешно отправлено в чат {chat_id}, {thread_info}")
+        return result
+    except Exception as e:
+        thread_info = f"thread {thread_id}" if thread_id else "основной чат"
+        logging.error(f"❌ Ошибка отправки видео в чат {chat_id}, {thread_info}: {e}")
+        raise
+
+def send_media_group_with_thread_logging(chat_id, media, thread_id=None, **kwargs):
+    """Отправить медиа-группу с логированием чата и топика"""
+    try:
+        thread_info = f"thread {thread_id}" if thread_id else "основной чат"
+        logging.info(f"📤 Отправка медиа-группы ({len(media)} файлов) в чат {chat_id}, {thread_info}")
+        
+        if thread_id:
+            kwargs['message_thread_id'] = thread_id
+        result = bot.send_media_group(chat_id, media, **kwargs)
+        
+        logging.info(f"✅ Медиа-группа успешно отправлена в чат {chat_id}, {thread_info}")
+        return result
+    except Exception as e:
+        thread_info = f"thread {thread_id}" if thread_id else "основной чат"
+        logging.error(f"❌ Ошибка отправки медиа-группы в чат {chat_id}, {thread_info}: {e}")
+        raise
+
 # === ФУНКЦИИ ДЛЯ АВТОМАТИЧЕСКОГО МОНИТОРИНГА ПОГОДЫ ===
 def get_weather_raw():
     url = f"http://api.openweathermap.org/data/2.5/weather?q={OPENWEATHER_CITY}&appid={OPENWEATHER_API_KEY}&units=metric&lang=ru"
@@ -474,7 +551,7 @@ def send_delivery_reminder():
     try:
         message = get_random_message_with_no_repeat(DELIVERY_REMINDERS, last_delivery_message)
         
-        bot.send_message(CHAT_ID_FOR_REPORT, message, message_thread_id=THREAD_ID_FOR_ORDER, parse_mode='Markdown')
+        send_message_with_thread_logging(CHAT_ID_FOR_REPORT, message, thread_id=THREAD_ID_FOR_ORDER, parse_mode='Markdown')
         logging.info(f"Напоминание о поставке отправлено в чат: {message}")
         
     except Exception as e:
@@ -1163,17 +1240,21 @@ def start(message):
         "popular_items_list": [],  # Список популярных товаров для текущей сессии
         "temp_shop": None  # Временное хранилище магазина для популярных товаров после отправки заказа
     }
-    bot.send_message(chat_id, "Привет! Выберите магазин для переводов:", reply_markup=get_shop_menu())
+    
+    # Получаем thread_id из входящего сообщения для ответа в тот же топик
+    thread_id = get_thread_id_from_message(message)
+    send_message_with_thread_logging(chat_id, "Привет! Выберите магазин для переводов:", thread_id=thread_id, reply_markup=get_shop_menu())
 
 @bot.message_handler(commands=['test_reminder'])
 def test_reminders(message):
     """Команда для тестирования системы напоминаний (только для администратора)"""
     chat_id = message.chat.id
+    thread_id = get_thread_id_from_message(message)
     
     # Проверка прав доступа (замените YOUR_ADMIN_ID на ваш фактический Telegram ID)
     # ADMIN_ID = 123456789  # Замените на свой ID
     # if chat_id != ADMIN_ID:
-    #     bot.send_message(chat_id, "❌ У вас нет прав для использования этой команды")
+    #     send_message_with_thread_logging(chat_id, "❌ У вас нет прав для использования этой команды", thread_id=thread_id)
     #     return
     
     add_user_to_tracking(chat_id)
@@ -1181,22 +1262,22 @@ def test_reminders(message):
     try:
         # Информация о системе напоминаний
         scheduler_jobs = len(scheduler.get_jobs())
-        bot.send_message(chat_id, 
+        send_message_with_thread_logging(chat_id, 
             f"📊 Статус системы напоминаний:\n"
             f"👥 Пользователей в системе: {len(all_bot_users)}\n"
             f"⏰ Активных задач в планировщике: {scheduler_jobs}\n"
-            f"🚀 Планировщик запущен: {'✅' if scheduler.running else '❌'}")
+            f"🚀 Планировщик запущен: {'✅' if scheduler.running else '❌'}", thread_id=thread_id)
         
         # Тест мотивационного напоминания (только для админа)
         send_motivational_reminder()
-        bot.send_message(chat_id, "✅ Тестовое мотивационное напоминание отправлено")
+        send_message_with_thread_logging(chat_id, "✅ Тестовое мотивационное напоминание отправлено", thread_id=thread_id)
         
         # Тест напоминания о поставке
         send_delivery_reminder()
-        bot.send_message(chat_id, "✅ Тестовое напоминание о поставке отправлено в чат")
+        send_message_with_thread_logging(chat_id, "✅ Тестовое напоминание о поставке отправлено в чат", thread_id=thread_id)
         
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка тестирования напоминаний: {e}")
+        send_message_with_thread_logging(chat_id, f"❌ Ошибка тестирования напоминаний: {e}", thread_id=thread_id)
         logging.error(f"Ошибка тестирования напоминаний: {e}")
 
 @bot.message_handler(func=lambda m: m.text in ["Янтарь", "Хайп", "Полка", "⬅️ Назад"])
@@ -1776,6 +1857,7 @@ def handle_any_message(message):
     chat_id = message.chat.id
     text = message.text.strip()
     user = user_data.get(chat_id)
+    thread_id = get_thread_id_from_message(message)
 
     # Добавляем пользователя в систему отслеживания для напоминаний
     add_user_to_tracking(chat_id)
@@ -1790,10 +1872,10 @@ def handle_any_message(message):
             user["stage"] = "choose_shop_order_with_saved"
             saved_items = user["saved_order"]
             saved_text = ", ".join(saved_items)
-            bot.send_message(chat_id, f"💾 У вас есть сохранённый заказ: {saved_text}\n\nВыберите магазин для заказа (сохранённый заказ будет объединён с неприехавшими товарами):", reply_markup=get_shop_menu(include_back=True))
+            send_message_with_thread_logging(chat_id, f"💾 У вас есть сохранённый заказ: {saved_text}\n\nВыберите магазин для заказа (сохранённый заказ будет объединён с неприехавшими товарами):", thread_id=thread_id, reply_markup=get_shop_menu(include_back=True))
         else:
             user["stage"] = "choose_shop_order"
-            bot.send_message(chat_id, "Выберите магазин для заказа:", reply_markup=get_shop_menu(include_back=True))
+            send_message_with_thread_logging(chat_id, "Выберите магазин для заказа:", thread_id=thread_id, reply_markup=get_shop_menu(include_back=True))
         return
 
     # Order handling
@@ -1801,7 +1883,7 @@ def handle_any_message(message):
         if text in ["✅ Отправить заказ", "🗑 Удалить из заказа", "⭐ Популярные товары", "💾 Сохранить заказ (не отправлять)", "❌ Отмена"]:
             if text == "✅ Отправить заказ":
                 if not user["order_items"]:
-                    bot.send_message(chat_id, "⚠️ Заказ пуст, нечего отправлять.")
+                    send_message_with_thread_logging(chat_id, "⚠️ Заказ пуст, нечего отправлять.", thread_id=thread_id)
                     return
                 
                 # Отправляем заказ сразу без выбора продавцов
@@ -1816,7 +1898,7 @@ def handle_any_message(message):
                     f"📦 Позиций в заказе: **{order_count}**\n"
                     f"🚀 Заказ {'дополнен и ' if is_appended else ''}отправляется..."
                 )
-                confirmation_msg = bot.send_message(chat_id, instant_confirmation, parse_mode='Markdown')
+                confirmation_msg = send_message_with_thread_logging(chat_id, instant_confirmation, thread_id=thread_id, parse_mode='Markdown')
                 
                 # Трекинг популярности товаров при отправке заказа
                 for item in user["order_items"]:
@@ -1836,7 +1918,7 @@ def handle_any_message(message):
                 user["stage"] = "main"
                 
                 success_msg = "✅ Заказ успешно отправлен в группу!" if is_appended else "✅ Заказ успешно отправлен!"
-                bot.send_message(chat_id, success_msg, reply_markup=get_main_menu())
+                send_message_with_thread_logging(chat_id, success_msg, thread_id=thread_id, reply_markup=get_main_menu())
                 return
 
             elif text == "⭐ Популярные товары":
@@ -1852,14 +1934,14 @@ def handle_any_message(message):
                         f"Выберите товары для быстрого добавления в заказ:"
                     )
                     
-                    bot.send_message(chat_id, popular_msg, reply_markup=markup)
+                    send_message_with_thread_logging(chat_id, popular_msg, thread_id=thread_id, reply_markup=markup)
                 else:
-                    bot.send_message(chat_id, "📊 Пока нет статистики по популярным товарам. После нескольких заказов здесь будут отображаться наиболее часто заказываемые позиции.", reply_markup=get_order_action_menu())
+                    send_message_with_thread_logging(chat_id, "📊 Пока нет статистики по популярным товарам. После нескольких заказов здесь будут отображаться наиболее часто заказываемые позиции.", thread_id=thread_id, reply_markup=get_order_action_menu())
                 return
 
             elif text == "🗑 Удалить из заказа":
                 if not user["order_items"]:
-                    bot.send_message(chat_id, "⚠️ Заказ пуст, нечего удалять.")
+                    send_message_with_thread_logging(chat_id, "⚠️ Заказ пуст, нечего удалять.", thread_id=thread_id)
                     return
                 
                 # Переход в режим интерактивного удаления
@@ -1874,12 +1956,12 @@ def handle_any_message(message):
                 )
                 
                 removal_keyboard = get_order_removal_keyboard(user["order_items"])
-                bot.send_message(chat_id, removal_msg, reply_markup=removal_keyboard)
+                send_message_with_thread_logging(chat_id, removal_msg, thread_id=thread_id, reply_markup=removal_keyboard)
                 return
 
             elif text == "💾 Сохранить заказ (не отправлять)":
                 if not user["order_items"]:
-                    bot.send_message(chat_id, "⚠️ Заказ пуст, нечего сохранять.")
+                    send_message_with_thread_logging(chat_id, "⚠️ Заказ пуст, нечего сохранять.", thread_id=thread_id)
                     return
                 user["saved_order"] = user["order_items"].copy()
                 user["order_items"] = []
@@ -1889,7 +1971,7 @@ def handle_any_message(message):
                 user["order_is_appended"] = False
                 user["original_order_count"] = 0
                 user["stage"] = "main"
-                bot.send_message(chat_id, "💾 Заказ сохранён. Чтобы отправить — зайдите в заказ и нажмите «✅ Отправить заказ»", reply_markup=get_main_menu())
+                send_message_with_thread_logging(chat_id, "💾 Заказ сохранён. Чтобы отправить — зайдите в заказ и нажмите «✅ Отправить заказ»", thread_id=thread_id, reply_markup=get_main_menu())
                 return
 
             elif text == "❌ Отмена":
@@ -1900,7 +1982,7 @@ def handle_any_message(message):
                 user["order_is_appended"] = False
                 user["original_order_count"] = 0
                 user["stage"] = "main"
-                bot.send_message(chat_id, "❌ Действие отменено.", reply_markup=get_main_menu())
+                send_message_with_thread_logging(chat_id, "❌ Действие отменено.", thread_id=thread_id, reply_markup=get_main_menu())
                 return
         else:
             # Handle text input as order items
