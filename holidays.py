@@ -7,7 +7,7 @@
 import json
 import os
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Dict, List, Optional
 from telebot import types
 
@@ -189,6 +189,32 @@ class HolidayDatabase:
     def get_user_info(self, user_id: int) -> Optional[Dict]:
         """Получить информацию о пользователе"""
         return self._data["users"].get(str(user_id))
+    
+    def is_date_available(self, holiday_date: str) -> bool:
+        """Проверить, доступна ли дата для подачи заявки (нет одобренных заявок на эту дату)"""
+        for req_data in self._data["requests"].values():
+            if (req_data["date"] == holiday_date and 
+                req_data["status"] == STATUS_APPROVED):
+                return False
+        return True
+    
+    def get_free_dates(self, days_count: int = 7) -> List[str]:
+        """Получить список ближайших свободных дат для выходных"""
+        free_dates = []
+        current_date = date.today()
+        days_checked = 0
+        max_days_to_check = days_count * 5  # Проверяем больше дней, чтобы найти нужное количество свободных
+        
+        while len(free_dates) < days_count and days_checked < max_days_to_check:
+            days_checked += 1
+            check_date = current_date + timedelta(days=days_checked)
+            date_str = check_date.isoformat()
+            
+            # Проверяем только будние дни (понедельник-пятница, weekday 0-4)
+            if check_date.weekday() < 5 and self.is_date_available(date_str):
+                free_dates.append(date_str)
+        
+        return free_dates
 
 # Глобальная база данных
 db = HolidayDatabase(HOLIDAYS_DB_PATH)
@@ -252,6 +278,108 @@ def create_approval_keyboard(request_id: int) -> types.InlineKeyboardMarkup:
     )
     return keyboard
 
+def parse_flexible_date(date_input: str) -> Optional[date]:
+    """
+    Парсинг гибкого формата даты для команды /в
+    
+    Поддерживаемые форматы:
+    - /в 24 -> если до 24 числа - текущий месяц, если >= 24 - следующий месяц
+    - /в 24.08 или /в 24 08 -> 24-е указанного месяца (этот или следующий год)
+    - /в 24.08.2025 или /в 24 08 2025 -> точная дата
+    
+    Returns:
+        date объект или None при ошибке парсинга
+    """
+    try:
+        # Нормализуем входные данные - заменяем пробелы на точки и убираем лишние пробелы
+        normalized = date_input.strip().replace(' ', '.')
+        
+        # Убираем ведущие нули
+        parts = []
+        for part in normalized.split('.'):
+            if part.isdigit():
+                parts.append(str(int(part)))  # Убираем ведущие нули
+            else:
+                parts.append(part)
+        
+        today = date.today()
+        current_year = today.year
+        current_month = today.month
+        current_day = today.day
+        
+        if len(parts) == 1:
+            # Формат: /в 24
+            day = int(parts[0])
+            if not (1 <= day <= 31):
+                return None
+                
+            # Логика выбора месяца
+            if current_day < day:
+                # До этого числа в текущем месяце - берем текущий месяц
+                target_month = current_month
+                target_year = current_year
+            else:
+                # После этого числа - берем следующий месяц
+                if current_month == 12:
+                    target_month = 1
+                    target_year = current_year + 1
+                else:
+                    target_month = current_month + 1
+                    target_year = current_year
+            
+            # Проверяем валидность даты
+            try:
+                return date(target_year, target_month, day)
+            except ValueError:
+                return None
+            
+        elif len(parts) == 2:
+            # Формат: /в 24.08 или /в 24 08
+            day = int(parts[0])
+            month = int(parts[1])
+            
+            if not (1 <= day <= 31) or not (1 <= month <= 12):
+                return None
+            
+            # Выбираем год - этот или следующий
+            target_date_this_year = None
+            try:
+                target_date_this_year = date(current_year, month, day)
+            except ValueError:
+                # Invalid date (like Feb 31) - try next year
+                try:
+                    return date(current_year + 1, month, day)
+                except ValueError:
+                    return None
+            
+            if target_date_this_year and target_date_this_year > today:
+                return target_date_this_year
+            else:
+                try:
+                    return date(current_year + 1, month, day)
+                except ValueError:
+                    return None
+            
+        elif len(parts) == 3:
+            # Формат: /в 24.08.2025 или /в 24 08 2025
+            day = int(parts[0])
+            month = int(parts[1])
+            year = int(parts[2])
+            
+            if not (1 <= day <= 31) or not (1 <= month <= 12) or year < 2020:
+                return None
+            
+            try:
+                return date(year, month, day)
+            except ValueError:
+                return None
+        
+        else:
+            return None
+            
+    except (ValueError, IndexError):
+        return None
+
 def handle_holiday_request(bot, message):
     """Обработчик команды подачи заявки на выходной"""
     logging.info(f"🎯 Обработка заявки на выходной от пользователя {message.from_user.id}")
@@ -304,6 +432,12 @@ def handle_holiday_request(bot, message):
             logging.info(f"❌ Попытка подачи заявки на прошедшую дату {date_str} от пользователя {message.from_user.id}")
             return
         
+        # Проверяем, что дата свободна (нет одобренных заявок)
+        if not db.is_date_available(date_str):
+            bot.reply_to(message, f"❌ Дата {format_date(date_str)} уже занята! Выберите другую дату.")
+            logging.info(f"❌ Попытка подачи заявки на занятую дату {date_str} от пользователя {message.from_user.id}")
+            return
+        
         # Создаем заявку
         request_id = db.create_request(message.from_user.id, date_str, reason)
         logging.info(f"✅ Создана заявка #{request_id} от пользователя {message.from_user.id}")
@@ -345,6 +479,148 @@ def handle_holiday_request(bot, message):
     except Exception as e:
         logging.error(f"❌ Ошибка обработки заявки на выходной от пользователя {message.from_user.id}: {e}")
         bot.reply_to(message, "❌ Произошла ошибка при подаче заявки. Попробуйте позже.")
+
+def handle_flexible_holiday_request(bot, message):
+    """Обработчик команды /в с гибким форматом даты"""
+    logging.info(f"🎯 Обработка гибкой заявки на выходной от пользователя {message.from_user.id}")
+    
+    try:
+        # Добавляем пользователя в базу
+        user_data = {
+            "username": message.from_user.username,
+            "first_name": message.from_user.first_name,
+            "last_name": message.from_user.last_name
+        }
+        db.add_user(message.from_user.id, user_data)
+        logging.info(f"✅ Пользователь {message.from_user.id} добавлен в базу")
+        
+        # Парсим текст сообщения
+        text = message.text.strip()
+        parts = text.split(None, 2)  # Разделяем на максимум 3 части
+        
+        if len(parts) < 3:
+            error_msg = (
+                "❌ Неправильный формат команды!\n\n"
+                "Используйте: /в дата причина\n"
+                "Примеры:\n"
+                "• /в 24 семейные обстоятельства\n"
+                "• /в 24.08 отпуск\n" 
+                "• /в 24 08 болезнь\n"
+                "• /в 24.08.2025 свадьба\n"
+                "• /в 24 08 2025 командировка"
+            )
+            bot.reply_to(message, error_msg)
+            logging.info(f"❌ Неправильный формат команды /в от пользователя {message.from_user.id}")
+            return
+        
+        command, date_input, reason = parts
+        logging.info(f"📅 Парсинг гибкой заявки: дата_ввод={date_input}, причина={reason[:30]}...")
+        
+        # Парсим дату с помощью нашей функции
+        holiday_date = parse_flexible_date(date_input)
+        if not holiday_date:
+            error_msg = (
+                "❌ Неправильный формат даты!\n\n"
+                "Поддерживаемые форматы:\n"
+                "• /в 24 (день текущего/следующего месяца)\n"
+                "• /в 24.08 или /в 24 08 (день и месяц)\n"
+                "• /в 24.08.2025 или /в 24 08 2025 (полная дата)"
+            )
+            bot.reply_to(message, error_msg)
+            logging.error(f"❌ Неправильный формат даты '{date_input}' от пользователя {message.from_user.id}")
+            return
+        
+        date_str = holiday_date.isoformat()
+        logging.info(f"📅 Распознанная дата: {date_str}")
+        
+        # Проверяем, что дата в будущем
+        if holiday_date <= date.today():
+            bot.reply_to(message, "❌ Нельзя подать заявку на прошедшую дату!")
+            logging.info(f"❌ Попытка подачи заявки на прошедшую дату {date_str} от пользователя {message.from_user.id}")
+            return
+        
+        # Проверяем, что дата свободна (нет одобренных заявок)
+        if not db.is_date_available(date_str):
+            bot.reply_to(message, f"❌ Дата {format_date(date_str)} уже занята! Выберите другую дату.")
+            logging.info(f"❌ Попытка подачи заявки на занятую дату {date_str} от пользователя {message.from_user.id}")
+            return
+        
+        # Создаем заявку
+        request_id = db.create_request(message.from_user.id, date_str, reason)
+        logging.info(f"✅ Создана заявка #{request_id} от пользователя {message.from_user.id}")
+        
+        # Отправляем подтверждение пользователю
+        user_name = get_user_display_name(user_data)
+        confirmation_msg = (
+            f"✅ Заявка на выходной подана!\n\n"
+            f"📅 Дата: {format_date(date_str)}\n"
+            f"📝 Причина: {reason}\n"
+            f"🆔 Номер заявки: #{request_id}\n\n"
+            f"Ваша заявка будет рассмотрена администратором."
+        )
+        reply_to_with_thread_logging(bot, message, confirmation_msg)
+        logging.info(f"✅ Подтверждение отправлено пользователю {message.from_user.id}")
+        
+        # Отправляем уведомление администраторам
+        admin_text = (
+            f"📝 Новая заявка на выходной\n\n"
+            f"👤 От: {user_name} (ID: {message.from_user.id})\n"
+            f"📅 Дата: {format_date(date_str)}\n"
+            f"📝 Причина: {reason}\n"
+            f"🆔 Заявка: #{request_id}\n"
+            f"🕐 Подана: {format_datetime(datetime.now().isoformat())}"
+        )
+        
+        try:
+            send_message_with_thread_logging(
+                bot,
+                HOLIDAYS_CHAT_ID,
+                admin_text,
+                thread_id=HOLIDAYS_THREAD_ID,
+                reply_markup=create_approval_keyboard(request_id)
+            )
+            logging.info(f"✅ Уведомление администраторам отправлено для заявки #{request_id}")
+        except Exception as e:
+            logging.error(f"❌ Ошибка отправки уведомления администраторам: {e}")
+    
+    except Exception as e:
+        logging.error(f"❌ Ошибка обработки гибкой заявки на выходной от пользователя {message.from_user.id}: {e}")
+        bot.reply_to(message, "❌ Произошла ошибка при подаче заявки. Попробуйте позже.")
+
+def handle_free_dates_command(bot, message):
+    """Обработчик команд /сд, /даты - показать свободные даты"""
+    logging.info(f"🎯 Обработка команды свободных дат от пользователя {message.from_user.id}")
+    
+    try:
+        # Добавляем пользователя в базу
+        user_data = {
+            "username": message.from_user.username,
+            "first_name": message.from_user.first_name,
+            "last_name": message.from_user.last_name
+        }
+        db.add_user(message.from_user.id, user_data)
+        
+        # Получаем свободные даты
+        free_dates = db.get_free_dates(7)
+        logging.info(f"📊 Найдено {len(free_dates)} свободных дат")
+        
+        if not free_dates:
+            bot.reply_to(message, "😔 В ближайшее время свободных дат для выходных не найдено.")
+            return
+        
+        # Формируем ответ
+        text = "📅 Ближайшие свободные даты для выходных:\n\n"
+        for i, date_str in enumerate(free_dates, 1):
+            text += f"{i}. {format_date(date_str)}\n"
+        
+        text += f"\n💡 Для подачи заявки используйте команду /в"
+        
+        reply_to_with_thread_logging(bot, message, text)
+        logging.info(f"✅ Список свободных дат отправлен пользователю {message.from_user.id}")
+    
+    except Exception as e:
+        logging.error(f"❌ Ошибка получения свободных дат для пользователя {message.from_user.id}: {e}")
+        bot.reply_to(message, "❌ Произошла ошибка при получении данных.")
 
 def handle_future_holidays_command(bot, message):
     """Обработчик команды /вых - показать будущие одобренные выходные"""
@@ -529,20 +805,30 @@ def register_holiday_handlers(bot, debug_mode=True):
         debug_mode: Если True, регистрирует debug-обработчик (по умолчанию включен)
     """
     
-    # Команда подачи заявки на выходной - ТОЛЬКО для нужного чата и топика
+    # Команда подачи заявки на выходной (старый формат) - ТОЛЬКО для нужного чата и топика
     @bot.message_handler(commands=['выходной'], func=lambda message: is_holidays_chat_and_thread(message))
     def holiday_request_handler(message):
         handle_holiday_request(bot, message)
+    
+    # Команда подачи заявки на выходной (новый гибкий формат) - ТОЛЬКО для нужного чата и топика
+    @bot.message_handler(commands=['в'], func=lambda message: is_holidays_chat_and_thread(message))
+    def flexible_holiday_request_handler(message):
+        handle_flexible_holiday_request(bot, message)
     
     # Команда просмотра будущих выходных - ТОЛЬКО для нужного чата и топика
     @bot.message_handler(commands=['вых'], func=lambda message: is_holidays_chat_and_thread(message))
     def future_holidays_handler(message):
         handle_future_holidays_command(bot, message)
     
-    # Команда просмотра всех выходных - ТОЛЬКО для нужного чата и топика
-    @bot.message_handler(commands=['всевых'], func=lambda message: is_holidays_chat_and_thread(message))
+    # Команды просмотра всех выходных (оригинальная и синонимы) - ТОЛЬКО для нужного чата и топика
+    @bot.message_handler(commands=['всевых', 'вс', 'список'], func=lambda message: is_holidays_chat_and_thread(message))
     def all_holidays_handler(message):
         handle_all_holidays_command(bot, message)
+    
+    # Команды для просмотра свободных дат - ТОЛЬКО для нужного чата и топика
+    @bot.message_handler(commands=['сд', 'даты'], func=lambda message: is_holidays_chat_and_thread(message))
+    def free_dates_handler(message):
+        handle_free_dates_command(bot, message)
     
     # Обработчик коллбэков для одобрения/отклонения - ТОЛЬКО для нужного чата
     @bot.callback_query_handler(func=lambda call: call.message.chat.id == HOLIDAYS_CHAT_ID and call.data.startswith(('holiday_approve_', 'holiday_reject_')))
