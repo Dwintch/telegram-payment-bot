@@ -18,7 +18,7 @@ Telegram Payment Bot with Automatic Reminder System
    - Отправка всем пользователям, взаимодействовавшим с ботом
 
 2. Напоминания о поставках в чат:
-   - Интервал: 9:00-15:00, до 4 напоминаний в день
+   - Интервал: 9:00-12:00, до 4 напоминаний в день
    - Рандомное время между отправками
    - Метка "НАПОМИНАНИЕ" и мотивирующие формулировки
    - Отправка в CHAT_ID_FOR_REPORT
@@ -471,16 +471,14 @@ def record_report_request(order_id):
     save_data()  # Сохраняем изменения
 
 def is_report_time_valid():
-    """Проверить, можно ли сейчас отправлять напоминания об отчетах (22:00-23:10)"""
+    """Проверить, можно ли сейчас отправлять напоминания об отчетах (22:00-23:00)"""
     moscow_tz = pytz.timezone('Europe/Moscow')
     current_time = datetime.now(moscow_tz)
     current_hour = current_time.hour
     current_minute = current_time.minute
     
-    # 22:00-23:10
+    # 22:00-23:00
     if current_hour == 22:
-        return True
-    elif current_hour == 23 and current_minute <= 10:
         return True
     else:
         return False
@@ -558,13 +556,13 @@ def send_delivery_reminder():
         logging.error(f"Ошибка при отправке напоминания о поставке: {e}")
 
 def send_report_reminder():
-    """Отправка напоминания о составлении отчёта всем пользователям (22:00-23:10)"""
+    """Отправка напоминания о составлении отчёта всем пользователям (22:00-23:00)"""
     global last_report_reminder_message
     
     try:
         # Проверяем временное окно для отправки напоминаний об отчетах
         if not is_report_time_valid():
-            logging.info("Напоминание об отчёте пропущено - вне временного окна (22:00-23:10)")
+            logging.info("Напоминание об отчёте пропущено - вне временного окна (22:00-23:00)")
             return
             
         if not all_bot_users:
@@ -690,7 +688,7 @@ def schedule_random_motivational_reminders():
     schedule_evening_reminders()
 
 def schedule_random_delivery_reminders():
-    """Планирование случайных напоминаний о поставках (9:00-15:00) - до 4 напоминаний в день
+    """Планирование случайных напоминаний о поставках (9:00-12:00) - до 4 напоминаний в день
     
     ВНИМАНИЕ: Напоминания о поставках временно отключены!
     Для включения раскомментируйте строки с scheduler.add_job ниже.
@@ -700,7 +698,7 @@ def schedule_random_delivery_reminders():
         """Ежедневное планирование напоминаний о поставках"""
         delivery_times = []
         base_time = 9 * 60   # 09:00 в минутах
-        end_time = 15 * 60   # 15:00 в минутах
+        end_time = 12 * 60   # 12:00 в минутах
         
         # Генерируем случайные времена для напоминаний о поставках
         for _ in range(random.randint(1, 4)):  # 1-4 сообщения
@@ -733,7 +731,7 @@ def schedule_random_delivery_reminders():
     # schedule_daily_delivery_reminders()
 
 def schedule_random_report_reminders():
-    """Планирование напоминаний об отчётах (22:00-23:10) и вопросов (23:00-00:00)
+    """Планирование напоминаний об отчётах (22:00-23:00) и вопросов (23:00-00:00)
     
     ВНИМАНИЕ: Напоминания об отчётах временно отключены!
     Для включения раскомментируйте строки с scheduler.add_job ниже.
@@ -741,10 +739,10 @@ def schedule_random_report_reminders():
     
     def schedule_daily_report_reminders():
         """Ежедневное планирование напоминаний об отчётах"""
-        # Напоминания об отчётах 22:00-23:10 (до 4 напоминаний)
+        # Напоминания об отчётах 22:00-23:00 (до 4 напоминаний)
         report_reminder_times = []
         base_time = 22 * 60   # 22:00 в минутах
-        end_time = 23 * 60 + 10    # 23:10 в минутах
+        end_time = 23 * 60    # 23:00 в минутах
         
         for _ in range(random.randint(1, 4)):  # 1-4 напоминания
             random_minutes = random.randint(base_time, end_time - 1)
@@ -2096,7 +2094,7 @@ def handle_any_message(message):
             user["terminal"] = amount
             user["stage"] = "choose_staff"
             user["selected_staff"] = []
-            send_message_with_thread_logging(chat_id, "Выберите сотрудников, thread_id=thread_id, которые были на смене:", reply_markup=get_staff_keyboard())
+            send_message_with_thread_logging(chat_id, "Выберите сотрудников, которые были на смене:", thread_id=thread_id, reply_markup=get_staff_keyboard())
             return
 
     if user.get("stage") == "confirm_report":

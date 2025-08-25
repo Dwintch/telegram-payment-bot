@@ -134,16 +134,16 @@ def test_scheduler_time_ranges():
     print(f"✅ Сгенерированы времена для утра: {morning_times}")
     print(f"✅ Сгенерированы времена для вечера: {evening_times}")
     
-    # Поставки: 9:00-15:00
+    # Поставки: 9:00-12:00
     delivery_times = []
     for _ in range(4):
-        hour = random.randint(9, 14)
+        hour = random.randint(9, 11)
         minute = random.randint(0, 59)
         time_str = f"{hour:02d}:{minute:02d}"
         delivery_times.append(time_str)
         
         # Проверяем что время в нужном диапазоне
-        assert 9 <= hour <= 14, f"Время поставок вне диапазона: {time_str}"
+        assert 9 <= hour <= 11, f"Время поставок вне диапазона: {time_str}"
     
     print(f"✅ Сгенерированы времена для поставок: {delivery_times}")
 
