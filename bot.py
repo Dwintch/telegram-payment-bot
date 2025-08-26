@@ -549,7 +549,7 @@ def send_delivery_reminder():
     try:
         message = get_random_message_with_no_repeat(DELIVERY_REMINDERS, last_delivery_message)
         
-        send_message_with_thread_logging(CHAT_ID_FOR_REPORT, message, thread_id=THREAD_ID_FOR_ORDER, parse_mode='Markdown')
+        send_message_with_thread_logging(CHAT_ID_FOR_REPORT, message, thread_id=THREAD_ID_FOR_REPORT, parse_mode='Markdown')
         logging.info(f"Напоминание о поставке отправлено в чат: {message}")
         
     except Exception as e:
@@ -1802,7 +1802,7 @@ def handle_delivery_callback(call):
             report_lines.append("\n✅ <b>Всё приехало в полном объёме.</b>")
         
         final_report = "\n".join(report_lines)
-        send_message_with_thread_logging(CHAT_ID_FOR_REPORT, final_report, thread_id=THREAD_ID_FOR_ORDER)
+        send_message_with_thread_logging(CHAT_ID_FOR_REPORT, final_report, thread_id=THREAD_ID_FOR_REPORT)
         
         # Delete old order message after delivery acceptance is completed
         if shop in shop_order_messages:
@@ -2207,7 +2207,7 @@ def send_report(chat_id):
     )
 
     sheet.append_row([date, shop, transfers, cash, terminal, staff, weather_report])
-    send_message_with_thread_logging(CHAT_ID_FOR_REPORT, report_text, thread_id=THREAD_ID_FOR_ORDER)
+    send_message_with_thread_logging(CHAT_ID_FOR_REPORT, report_text, thread_id=THREAD_ID_FOR_REPORT)
 
 def send_order(chat_id, appended=False):
     user = user_data[chat_id]
