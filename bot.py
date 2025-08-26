@@ -2034,13 +2034,13 @@ def handle_any_message(message):
     if text == "💰 Перевод":
         user["mode"] = "add"
         user["stage"] = "amount_input"
-        send_message_with_thread_logging(chat_id, "Оп, thread_id=thread_id, лавешечка капнула! Сколько пришло?:")
+        send_message_with_thread_logging(chat_id, "Оп, лавешечка капнула! Сколько пришло?:", thread_id=thread_id)
         return
 
     if text == "💸 Возврат":
         user["mode"] = "subtract"
         user["stage"] = "amount_input"
-        send_message_with_thread_logging(chat_id, "Смешно, thread_id=thread_id, возврат на сумму:")
+        send_message_with_thread_logging(chat_id, "Смешно, возврат на сумму:", thread_id=thread_id)
         return
 
     if text == "👀 Посмотреть сумму":
