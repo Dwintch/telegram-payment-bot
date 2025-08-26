@@ -1283,10 +1283,22 @@ def test_reminders(message):
 def choose_shop(message):
     chat_id = message.chat.id
     user = user_data.get(chat_id)
-    # Кнопка Назад для заказа и поставки
+    
+    # Only handle shop selection and back button if user is in appropriate stages
+    current_stage = user.get("stage") if user else None
+    shop_selection_stages = ["choose_shop", "choose_shop_order", "choose_shop_order_with_saved", "choose_shop_delivery"]
+    
+    # Handle "⬅️ Назад" button for shop selection stages
     if message.text == "⬅️ Назад":
-        user["stage"] = "main"
-        bot.send_message(chat_id, "Вы вернулись в главное меню.", reply_markup=get_main_menu())
+        if current_stage in shop_selection_stages:
+            user["stage"] = "main"
+            bot.send_message(chat_id, "Вы вернулись в главное меню.", reply_markup=get_main_menu())
+        # If not in shop selection stage, let handle_any_message process it
+        return
+
+    # Only handle shop names if user is in a shop selection stage
+    if not current_stage or current_stage not in shop_selection_stages:
+        # Don't handle shop names for users not in shop selection stages - let handle_any_message process it
         return
 
     if not user or user.get("stage") == "choose_shop":
@@ -1499,8 +1511,9 @@ def choose_shop(message):
         bot.send_message(chat_id, "Пожалуйста, выберите магазин из меню.", reply_markup=get_shop_menu(include_back=True))
     elif current_stage == "choose_shop_delivery":
         bot.send_message(chat_id, "Пожалуйста, выберите магазин из меню.", reply_markup=get_shop_menu(include_back=True))
-    else:
+    elif current_stage == "choose_shop":
         bot.send_message(chat_id, "Пожалуйста, выберите магазин из меню.", reply_markup=get_shop_menu())
+    # For other stages (cash_input, terminal_input, etc.), don't intercept - let handle_any_message process it
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('popular_'))
 def handle_popular_items_callback(call):
