@@ -1717,10 +1717,13 @@ def handle_staff_callback(call):
         bot.answer_callback_query(call.id)
         return
 
+    # Получаем thread_id из callback сообщения
+    thread_id = get_thread_id_from_message(call.message)
+
     staff_name = call.data.replace('staff_', '')
     if staff_name == 'done':
         user['stage'] = 'confirm_report'
-        preview_report(chat_id)
+        preview_report(chat_id, thread_id)
         bot.answer_callback_query(call.id)
         return
 
@@ -1744,6 +1747,9 @@ def handle_delivery_callback(call):
     if not user or user.get('stage') != 'delivery_buttons':
         bot.answer_callback_query(call.id, "❌ Сессия истекла")
         return
+
+    # Получаем thread_id из callback сообщения
+    thread_id = get_thread_id_from_message(call.message)
 
     # Получаем магазин для приемки
     shop = user.get("order_shop")
@@ -1808,9 +1814,9 @@ def handle_delivery_callback(call):
                 print(f"Ошибка удаления старого сообщения заказа после приемки: {e}")
         
         if not_arrived:
-            bot.send_message(chat_id, "❌ Товары, которые не приехали, будут автоматически добавлены в следующий заказ.", reply_markup=get_main_menu())
+            send_message_with_thread_logging(chat_id, "❌ Товары, которые не приехали, будут автоматически добавлены в следующий заказ.", thread_id=thread_id, reply_markup=get_main_menu())
         else:
-            bot.send_message(chat_id, "✅ Поставка принята полностью. Остатков нет.", reply_markup=get_main_menu())
+            send_message_with_thread_logging(chat_id, "✅ Поставка принята полностью. Остатков нет.", thread_id=thread_id, reply_markup=get_main_menu())
         
         # Очищаем временные данные пользователя
         user["delivery_arrived"] = []
@@ -2028,13 +2034,13 @@ def handle_any_message(message):
     if text == "💰 Перевод":
         user["mode"] = "add"
         user["stage"] = "amount_input"
-        send_message_with_thread_logging(chat_id, "Оп, thread_id=thread_id, лавешечка капнула! Сколько пришло?:")
+        send_message_with_thread_logging(chat_id, "Оп, лавешечка капнула! Сколько пришло?:", thread_id=thread_id)
         return
 
     if text == "💸 Возврат":
         user["mode"] = "subtract"
         user["stage"] = "amount_input"
-        send_message_with_thread_logging(chat_id, "Смешно, thread_id=thread_id, возврат на сумму:")
+        send_message_with_thread_logging(chat_id, "Смешно, возврат на сумму:", thread_id=thread_id)
         return
 
     if text == "👀 Посмотреть сумму":
@@ -2130,14 +2136,14 @@ def handle_any_message(message):
             user["date"] = custom_date.strftime("%d.%m.%Y")
             user["stage"] = "confirm_report"
             send_message_with_thread_logging(chat_id, f"✅ Дата изменена на: {user['date']}", thread_id=thread_id)
-            preview_report(chat_id)
+            preview_report(chat_id, thread_id)
         except ValueError:
             send_message_with_thread_logging(chat_id, "⚠️ Неверный формат даты. Введите в формате ДД.ММ.ГГГГ:", thread_id=thread_id)
         return
 
     send_message_with_thread_logging(chat_id, "Выберите действие:", thread_id=thread_id, reply_markup=get_main_menu())
 
-def preview_report(chat_id):
+def preview_report(chat_id, thread_id=None):
     data = user_data[chat_id]
     shop = data["shop"]
     # Используем переводы из данных магазина
